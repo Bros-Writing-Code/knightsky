@@ -1,6 +1,19 @@
 // @ts-check
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
+
+// package.json is the only place the version lives; the page footer reads it from here.
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+
+/** Replaces %APP_VERSION% in index.html, so the footer never needs a hand edit. */
+function appVersion() {
+  return {
+    name: 'app-version',
+    /** @param {string} html */
+    transformIndexHtml: (html) => html.replaceAll('%APP_VERSION%', version),
+  };
+}
 
 // SITE_URL is the deployed URL, set by CI from the SITE_URL repo variable. Only its path
 // becomes Vite's base. Unset locally, so dev serves from '/'. A domain change needs no
@@ -43,7 +56,7 @@ function clientMetadata() {
 }
 
 export default defineConfig({
-  plugins: [clientMetadata()],
+  plugins: [appVersion(), clientMetadata()],
   // The app being built. Change this when the demo is replaced (#13).
   root: 'src/app/chessground-demo',
   base: siteUrl ? new URL(siteUrl).pathname : '/',

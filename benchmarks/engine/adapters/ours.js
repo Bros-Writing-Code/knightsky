@@ -2,7 +2,12 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export async function loadOurs(root = process.env.BENCH_ENGINE_ROOT || process.cwd()) {
-  const api = await import(pathToFileURL(resolve(root, 'src/engine/index.js')).href);
+  const entry = resolve(root, 'src/engine/index.js');
+  // Vitest loads plain paths but can't find %-encoded file URLs (a space becomes %20);
+  // plain Node needs a file URL. Forward slashes keep Windows paths valid for Vite.
+  const api = await import(
+    /* @vite-ignore */ process.env.VITEST ? entry.replaceAll('\\', '/') : pathToFileURL(entry).href
+  );
   for (const name of [
     'createGame',
     'applyMove',

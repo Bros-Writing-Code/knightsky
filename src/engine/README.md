@@ -67,8 +67,20 @@ const { status, winner } = getGameStatus(state);           // 'active' | 'checkm
 | `getGameStatus(state)` | `{ status, winner, drawReason }` |
 | `GameStatetoFEN(state)` | FEN string (to load a FEN, use `createGame(fen)`) |
 | `moveToUCI(move)` / `UCItoMove(uci)` | UCI string / `Move` |
+| `toSAN(state, uci)` | SAN string, e.g. `'Nf3'`, `'exd6'`, `'O-O'`, `'e8=Q+'`, `'Qh4#'`; throws on an illegal move |
+| `fromSAN(state, san)` | `Result<string>` with the UCI move; accepts `+`/`#`/`!?`, `0-0`, and `e8Q` without `=` |
+| `replayPGN(pgn)` | `Result<GameState>` from the standard start; `''` is a game with no moves; the error names the failing move |
+| `appendMove(pgn, uci)` | `Result<{ pgn, state }>`: checks the whole PGN, adds the move, returns canonical PGN and the new state |
 | `printBoard(state.board)` | ASCII board (debug only) |
 
 **Promotion:** a pawn moving to the last rank (row 0 for White, row 7 for Black) needs a promotion piece. Append `q`, `r`, `b`, or `n` to the UCI, e.g. `e7e8q`.
+
+**PGN (AT game records):** the lexicon's `pgn` field holds the mainline from the standard start. Moves inside the engine stay UCI; `pgn.js` only converts. `appendMove` always writes the same canonical style, `1. e4 e5 2. Nf3` (no tags, no result token, single spaces), so two clients that played the same moves write identical text. `replayPGN` also reads tags, `{comments}`, `; comments`, `$1` annotations and a final result token, but rejects variations, since records hold the mainline only.
+
+```js
+let { pgn, state } = appendMove('', 'e2e4').value;  // pgn: '1. e4'
+const result = replayPGN(record.pgn);                  // validate an opponent's record
+if (!result.ok) reject(result.error);                  // e.g. 'Move 12 (Nxe9): Illegal or unknown move: Nxe9'
+```
 
 **Chessground destinations:** group `legalMoves(state)` by the first two characters, e.g. `"e2e4"` → `dests.get("e2").push("e4")`.

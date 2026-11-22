@@ -1,4 +1,4 @@
-# ADR 0008: Sign in with AT Protocol OAuth as a browser-only public client
+# ADR 0007: Sign in with AT Protocol OAuth as a browser-only public client
 
 - **Status:** Proposed
 - **Date:** 2026-11-21

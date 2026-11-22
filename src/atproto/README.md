@@ -1,6 +1,6 @@
 # AT Protocol Integration
 
-Author: James Keys
+Authors: James Keys and Adarsh Shetkar
 
 - [Lexicon options](lexicon-options.md)
 - [OAuth login](#oauth-login)

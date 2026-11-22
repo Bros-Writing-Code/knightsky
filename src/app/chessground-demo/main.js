@@ -116,6 +116,7 @@ function statusText() {
     return `${COLOR_LABELS[OPPONENTS[resignedColor]]} wins by resignation.`;
   }
   const { status, winner, drawReason, inCheck } = game.status();
+  // `&& winner` only narrows the type for @ts-check: checkmate always has a winner.
   if (status === 'checkmate' && winner) {
     return `Checkmate. ${COLOR_LABELS[winner]} wins.`;
   }

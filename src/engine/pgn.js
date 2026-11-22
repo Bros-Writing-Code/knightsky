@@ -229,30 +229,66 @@ export function fromSAN(state, san) {
 /* ─────────────────────────── PGN text ─────────────────────────── */
 
 /**
- * Splits PGN text into move tokens. Skips tag pairs ([Event "..."]),
- * comments ({...} and ; to end of line), NAGs ($1) and move numbers
- * ("1.", "1...", including "1.e4"). A result token (1-0, 0-1, 1/2-1/2, *)
- * may only come last. Variations are rejected: the lexicon stores the
- * mainline only.
+ * Removes comments ({...} and ; to end of line) and tag pairs ([Name "value"])
+ * in one pass. Brackets inside them mean nothing, so {note (text)} and
+ * [Event "Open (Round 2)"] are fine; parentheses anywhere else start a
+ * variation, which records never contain (the lexicon stores the mainline only).
+ *
+ * @param {string} pgn
+ * @returns {Result<string>} The move text, with comments and tags replaced by spaces.
+ */
+function moveText(pgn) {
+  let text = '';
+  let closer = null; // '}', '\n' or ']' while inside a comment or tag
+  let quoted = false; // inside a tag's "value", where ']' doesn't end the tag
+  let escaped = false;
+  for (const char of pgn) {
+    if (closer === ']' && (quoted || char === '"')) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        quoted = !quoted;
+      }
+    } else if (closer) {
+      if (char === closer) {
+        closer = null;
+        text += ' ';
+      }
+    } else if (char === '{' || char === ';' || char === '[') {
+      closer = { '{': '}', ';': '\n', '[': ']' }[char];
+    } else if (char === '(' || char === ')') {
+      return { ok: false, error: 'Variations are not supported; send the mainline only' };
+    } else {
+      text += char;
+    }
+  }
+  if (closer === '}') {
+    return { ok: false, error: 'Unclosed comment' };
+  }
+  if (closer === ']') {
+    return { ok: false, error: 'Unclosed tag' };
+  }
+  return { ok: true, value: text };
+}
+
+/**
+ * Splits PGN text into move tokens. Skips tag pairs, comments, NAGs ($1) and
+ * move numbers ("1.", "1...", including "1.e4"). A result token (1-0, 0-1,
+ * 1/2-1/2, *) may only come last.
  *
  * @param {string} pgn
  * @returns {Result<string[]>}
  */
 function tokenizePGN(pgn) {
-  if (pgn.includes('(') || pgn.includes(')')) {
-    return { ok: false, error: 'Variations are not supported; send the mainline only' };
+  const text = moveText(pgn);
+  if (!text.ok) {
+    return text;
   }
-  if (/\{[^}]*$/.test(pgn)) {
-    return { ok: false, error: 'Unclosed comment' };
-  }
-
-  const text = pgn
-    .replace(/\{[^}]*\}/g, ' ')
-    .replace(/;[^\n]*/g, ' ')
-    .replace(/\[[^\]]*\]/g, ' ');
 
   const tokens = [];
-  for (const raw of text.split(/\s+/)) {
+  for (const raw of text.value.split(/\s+/)) {
     const token = raw.replace(/^\d+\.+/, '');
     if (token !== '' && !/^\$\d+$/.test(token)) {
       tokens.push(token);

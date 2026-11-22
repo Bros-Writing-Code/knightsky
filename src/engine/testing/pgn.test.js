@@ -159,6 +159,22 @@ describe('replayPGN', () => {
     );
   });
 
+  it('ignores parentheses and brackets inside comments and tags', () => {
+    const afterNf3 = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2';
+    const pgns = [
+      '1. e4 {note (text)} e5 2. Nf3',
+      '[Event "Open (Round 2)"]\n1. e4 e5 2. Nf3',
+      '[Event "a]b \\"quoted\\" (x)"] 1. e4 e5 2. Nf3',
+      '1. e4 ; a (b) {c [d\ne5 2. Nf3',
+      '1. e4 {see [this] and ; that} e5 2. Nf3',
+    ];
+    for (const pgn of pgns) {
+      const result = replayPGN(pgn);
+      expect(result.ok, `${pgn}: ${result.error}`).toBe(true);
+      expect(GameStatetoFEN(result.value)).toBe(afterNf3);
+    }
+  });
+
   it('names the first illegal move', () => {
     expect(replayPGN('1. e4 e5 2. Nf6 Nc6')).toEqual({
       ok: false,
@@ -169,6 +185,8 @@ describe('replayPGN', () => {
   it('rejects variations, unclosed comments, moves after the result, and non-strings', () => {
     expect(replayPGN('1. e4 (1. d4) e5')).toMatchObject({ ok: false, error: /Variations/ });
     expect(replayPGN('1. e4 {oops e5')).toMatchObject({ ok: false, error: /Unclosed comment/ });
+    expect(replayPGN('1. e4 e5) 2. Nf3')).toMatchObject({ ok: false, error: /Variations/ });
+    expect(replayPGN('[Event "x" 1. e4')).toMatchObject({ ok: false, error: /Unclosed tag/ });
     expect(replayPGN('1. e4 1-0 e5')).toMatchObject({ ok: false, error: /after the result/ });
     expect(replayPGN(/** @type {any} */ (null))).toMatchObject({ ok: false });
   });

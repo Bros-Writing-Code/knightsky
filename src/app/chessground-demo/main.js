@@ -5,7 +5,7 @@ import '@lichess-org/chessground/assets/chessground.base.css';
 import '@lichess-org/chessground/assets/chessground.brown.css';
 import '@lichess-org/chessground/assets/chessground.cburnett.css';
 import './style.css';
-import { getProfile, initAuth, signIn, signOut } from '../../atproto/auth.js';
+import { getProfile, initAuth, signIn, signOut, onSessionDeleted } from '../../atproto/auth.js';
 import { createStockfishBot } from '../../bot/stockfish.js';
 import { COLORS, createClock } from './clock.js';
 import { createGame } from './game.js';
@@ -335,3 +335,10 @@ initAuth()
   })
   .catch(showLoginError)
   .finally(renderAccount);
+
+onSessionDeleted((sub) => {
+  if (session?.sub === sub) {
+    session = undefined;
+    renderAccount();
+  }
+});

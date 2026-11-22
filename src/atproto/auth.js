@@ -21,12 +21,20 @@ const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 /** @type {Promise<BrowserOAuthClient> | null} */
 let clientPromise = null;
 
+/** @type {(sub: string, cause: unknown) => void} */
+let onDeleted = () => {};
+
 function getClient() {
+  const options = {
+    handleResolver: HANDLE_RESOLVER,
+    /** @param {string} sub @param {unknown} cause */
+    onSessionDeleted: (sub, cause) => onDeleted(sub, cause),
+  };
   clientPromise ??= LOOPBACK_HOSTS.includes(location.hostname)
-    ? Promise.resolve(new BrowserOAuthClient({ handleResolver: HANDLE_RESOLVER }))
+    ? Promise.resolve(new BrowserOAuthClient(options))
     : BrowserOAuthClient.load({
         clientId: new URL(`${import.meta.env.BASE_URL}client-metadata.json`, location.origin).href,
-        handleResolver: HANDLE_RESOLVER,
+        ...options,
       });
   return clientPromise;
 }
@@ -75,4 +83,12 @@ export async function getProfile(did) {
  */
 export async function signOut(session) {
   await session.signOut();
+}
+
+/**
+ * Called when the library deletes a session: sign out in another tab, revoked or expired tokens.
+ * @param { (sub: string, cause: unknown) => void} callback
+ */
+export function onSessionDeleted(callback) {
+  onDeleted = callback;
 }

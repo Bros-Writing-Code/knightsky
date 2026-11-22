@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { sqIndex } from '../0x88helper.js';
+import { SQUARES, fromSquare, sqIndex, sqName, toSquare } from '../0x88helper.js';
 import { applyMove, getGameStatus, isInCheck } from '../gameState.js';
+import { moveGenerator } from '../moveGeneration.js';
 import { FENtoGameState, GameStatetoFEN } from '../notation.js';
 
 describe('isInCheck', () => {
@@ -217,5 +218,35 @@ describe('applyMove', () => {
     }
     expect(state).toMatchObject({ status: 'checkmate', winner: 'b', drawReason: null });
     expect(applyMove(state, 'e2e4').ok).toBe(false);
+  });
+});
+
+describe('repetition history', () => {
+  it('stores the same first four FEN fields as GameStatetoFEN, over random games', () => {
+    let seed = 7;
+    const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed / 2147483648);
+    for (let game = 0; game < 20; game++) {
+      let state = FENtoGameState(START);
+      for (let ply = 0; ply < 80 && state.status === 'active'; ply++) {
+        const moves = [];
+        for (const index of SQUARES) {
+          if (state.board[index]?.color === state.currentTurn) {
+            for (const to of moveGenerator(state, toSquare(index))) {
+              const uci = sqName(index) + sqName(fromSquare(to));
+              const lastRow = state.currentTurn === 'w' ? 0 : 7;
+              moves.push(state.board[index].type === 'p' && to.row === lastRow ? uci + 'q' : uci);
+            }
+          }
+        }
+        state = play(state, moves[Math.floor(random() * moves.length)]);
+        const [placement, turn, castling, enPassant] = GameStatetoFEN(state).split(' ');
+        const [keyPlacement, keyTurn, keyCastling, keyEnPassant] = state.positionHistory
+          .at(-1)
+          .split(' ');
+        expect([keyPlacement, keyTurn, keyCastling]).toEqual([placement, turn, castling]);
+        // The key drops an en passant square that no pawn can actually capture.
+        expect(keyEnPassant === '-' || keyEnPassant === enPassant).toBe(true);
+      }
+    }
   });
 });

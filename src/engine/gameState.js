@@ -240,7 +240,13 @@ function hasGameShape(state) {
 export function checkMove(state, uci) {
   let move;
   try {
-    move = UCItoMove(uci);
+    const parsed = UCItoMove(uci);
+    // Frozen because move records are shared between states (see applyMove).
+    move = Object.freeze({
+      ...parsed,
+      from: Object.freeze(parsed.from),
+      to: Object.freeze(parsed.to),
+    });
   } catch {
     return { ok: false, error: 'Malformed UCI move' };
   }
@@ -282,8 +288,9 @@ export function checkMove(state, uci) {
  * Bad move strings and illegal moves are returned as Result errors.
  *
  * The new state shares piece objects and earlier move records with the old
- * one. That is safe because the engine treats them as immutable values (see
- * cloneBoard), and getPiece/toGrid hand out copies.
+ * one. That is safe because they are frozen (createGame freezes the pieces,
+ * applyMove the promoted pieces and move records), so changing one throws
+ * instead of changing older states. getPiece/toGrid also hand out copies.
  *
  * @param {GameState} state - A state from createGame, replayMoves or applyMove.
  * @param {string} uci
@@ -299,7 +306,7 @@ export function applyMove(state, uci) {
   const captured = state.board[to];
   const board = boardAfterMove(state, state.board, from, to, piece);
   if (promotes) {
-    board[to] = { color: piece.color, type: /** @type {any} */ (move.promotion) };
+    board[to] = Object.freeze({ color: piece.color, type: /** @type {any} */ (move.promotion) });
   }
 
   const castlingRights = { ...state.castlingRights };

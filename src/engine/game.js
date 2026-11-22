@@ -36,6 +36,13 @@ export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0
 export function createGame(fen = START_FEN) {
   const state = FENtoGameState(fen);
   assertOneKingEach(state);
+  // States share piece objects (see applyMove), so freeze them: changing a piece
+  // in any state throws instead of silently changing older states too.
+  for (const piece of state.board) {
+    if (piece) {
+      Object.freeze(piece);
+    }
+  }
   return { ...state, ...getGameStatus(state) };
 }
 

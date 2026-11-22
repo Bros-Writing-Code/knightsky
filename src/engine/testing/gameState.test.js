@@ -90,6 +90,17 @@ function play(state, uci) {
   return result.value;
 }
 
+/** Deep-freeze an object so any mutation throws in strict mode. */
+function deepFreeze(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const key of Object.keys(value)) {
+      deepFreeze(value[key]);
+    }
+  }
+  return value;
+}
+
 describe('applyMove', () => {
   it('parses a legal move, advances turn and clocks, records history, and leaves input untouched', () => {
     const initial = FENtoGameState(START);
@@ -127,28 +138,30 @@ describe('applyMove', () => {
     expect(state.moveHistory).toEqual([]);
   });
 
-  it('returns a Result error for an invalid state instead of throwing', () => {
-    const missingKing = FENtoGameState('8/8/8/8/8/8/4P3/4K3 w - - 0 1');
-    expect(applyMove(missingKing, 'e2e4')).toEqual({ ok: false, error: 'Invalid game state' });
+  it('returns a Result error for a broken state instead of throwing', () => {
     expect(applyMove(null, 'e2e4')).toEqual({ ok: false, error: 'Invalid game state' });
+    expect(applyMove({}, 'e2e4')).toEqual({ ok: false, error: 'Invalid game state' });
+    const noHistory = { ...FENtoGameState(START), moveHistory: undefined };
+    expect(applyMove(noHistory, 'e2e4')).toEqual({ ok: false, error: 'Invalid game state' });
   });
 
-  it('does not share piece objects between old and new boards', () => {
-    const state = FENtoGameState(START);
-    const next = play(state, 'e2e4');
-    expect(next.board[sqIndex('a1')]).not.toBe(state.board[sqIndex('a1')]);
-    expect(next.board[sqIndex('e4')]).not.toBe(state.board[sqIndex('e2')]);
-    next.board[sqIndex('a1')].type = 'q';
-    expect(state.board[sqIndex('a1')].type).toBe('r');
-  });
-
-  it('does not share earlier move records with the previous state', () => {
-    const first = play(FENtoGameState(START), 'e2e4');
-    const second = play(first, 'e7e5');
-    expect(second.moveHistory[0]).not.toBe(first.moveHistory[0]);
-    expect(second.moveHistory[0].from).not.toBe(first.moveHistory[0].from);
-    second.moveHistory[0].from.col = 0;
-    expect(first.moveHistory[0].from.col).toBe(4);
+  it('never mutates its input, even when old and new states share pieces', () => {
+    // Every state is deep-frozen, so any write to a shared piece or move record throws.
+    const games = [
+      [START, ['e2e4', 'd7d5', 'e4d5', 'g8f6', 'g1f3', 'f6d5', 'f1c4', 'e7e6', 'e1g1']],
+      [START, ['e2e4', 'a7a6', 'e4e5', 'd7d5', 'e5d6']], // en passant
+      ['1n5k/P7/8/8/8/8/8/K7 w - - 0 1', ['a7b8q']], // promotion with capture
+    ];
+    for (const [fen, moves] of games) {
+      let state = deepFreeze(FENtoGameState(fen));
+      for (const uci of moves) {
+        const snapshot = structuredClone(state);
+        const result = applyMove(state, uci);
+        expect(result, `${uci}: ${result.error}`).toMatchObject({ ok: true });
+        expect(state).toEqual(snapshot);
+        state = deepFreeze(result.value);
+      }
+    }
   });
 
   it('updates quiet-move and capture clocks, including rook rights on capture', () => {

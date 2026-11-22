@@ -7,7 +7,7 @@
  */
 
 import { SQUARES, toIndex, toSquare } from './0x88helper.js';
-import { applyMove, getGameStatus } from './gameState.js';
+import { applyMove, checkMove, getGameStatus } from './gameState.js';
 import { moveGenerator } from './moveGeneration.js';
 import { FENtoGameState, moveToUCI } from './notation.js';
 
@@ -29,12 +29,29 @@ export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0
  *
  * @param {string} [fen=START_FEN] - Starting position.
  * @returns {GameState}
- * @throws {Error} If the FEN is malformed (use replayMoves for untrusted input).
+ * @throws {Error} If the FEN is malformed or a side doesn't have exactly one king
+ *   (use replayMoves for untrusted input).
  * @example const state = createGame();
  */
 export function createGame(fen = START_FEN) {
   const state = FENtoGameState(fen);
+  assertOneKingEach(state);
   return { ...state, ...getGameStatus(state) };
+}
+
+/**
+ * Checked once when a game is created, so applyMove doesn't recheck it on
+ * every move. Without both kings, check and checkmate have no meaning.
+ *
+ * @param {GameState} state
+ * @throws {Error} Unless each side has exactly one king.
+ */
+function assertOneKingEach(state) {
+  const kings = SQUARES.map((index) => state.board[index]).filter((piece) => piece?.type === 'k');
+  const white = kings.filter((king) => king?.color === 'w').length;
+  if (kings.length !== 2 || white !== 1) {
+    throw new Error('Invalid position: each side needs exactly one king');
+  }
 }
 
 /**
@@ -158,7 +175,8 @@ export function legalMoves(state) {
  * @returns {boolean}
  */
 export function isValidMove(state, uci) {
-  return applyMove(state, uci).ok;
+  // Only the legality check: no new state, histories or game status.
+  return checkMove(state, uci).ok;
 }
 
 /**

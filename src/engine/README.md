@@ -29,7 +29,8 @@ These functions are exported from `gameState.js`.
 | `isInCheck(state)` | `boolean` | Returns whether the side to move's king is attacked. |
 | `getGameStatus(state)` | `{ status, winner, drawReason }` | Returns `checkmate`, `stalemate`, `draw` (insufficient material, fifty-move rule, threefold repetition), or `active` for the current position. Checkmate and stalemate take priority. |
 | `isInsufficientMaterial(state)` | `boolean` | True for K vs K, K+B vs K, K+N vs K, or kings plus bishops all on one square color. |
-| `applyMove(state, uci)` | `Result<GameState>`: `{ ok: true, value: newState }` or `{ ok: false, error: string }` | Validates and applies a UCI move without changing `state`; updates the board, turn, special-move fields, history, and game status. |
+| `checkMove(state, uci)` | `Result<{ move, from, to, piece, promotes }>` | Checks that a UCI move is legal without building the next state. Shared by `applyMove` and `isValidMove`; internal, not exported from `index.js`. |
+| `applyMove(state, uci)` | `Result<GameState>`: `{ ok: true, value: newState }` or `{ ok: false, error: string }` | Validates and applies a UCI move without changing `state`; updates the board, turn, special-move fields, history, and game status. The new state shares piece objects and earlier move records with the old one, which is safe because the engine never modifies them. |
 
 ## Public API (`src/engine/index.js`)
 
@@ -55,12 +56,12 @@ const { status, winner } = getGameStatus(state);           // 'active' | 'checkm
 | Function | Returns |
 | --- | --- |
 | `START_FEN` | Starting position FEN string |
-| `createGame(fen = START_FEN)` | New `GameState` (fresh object every call); status already set, so a checkmate/stalemate FEN starts finished |
+| `createGame(fen = START_FEN)` | New `GameState` (fresh object every call); status already set, so a checkmate/stalemate FEN starts finished. Throws on a malformed FEN or unless each side has exactly one king; the position is checked here once, not on every move |
 | `getPiece(state, square)` | Copy of the `Piece`, or `null` |
 | `toGrid(state)` | 8×8 array of `Piece \| null` for rendering (copies) |
 | `legalMovesFrom(state, square)` | `Square[]` of legal destinations for one piece (king safety included); `[]` once the game is over |
 | `legalMoves(state)` | `string[]` of every legal move as UCI (promotions listed once per piece) |
-| `isValidMove(state, uci)` | `boolean`; never throws |
+| `isValidMove(state, uci)` | `boolean`; never throws; checks legality only, without building the next state |
 | `applyMove(state, uci)` | `Result<GameState>` (see `gameState` above) |
 | `replayMoves(ucis, startFen = START_FEN)` | `Result<GameState>`; the error names the failing move |
 | `isInCheck(state)` | `boolean` |

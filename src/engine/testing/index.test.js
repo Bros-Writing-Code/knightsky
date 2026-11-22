@@ -113,6 +113,15 @@ describe('createGame', () => {
     expect(GameStatetoFEN(createGame(fen))).toBe(fen);
   });
 
+  it('rejects a position unless each side has exactly one king', () => {
+    expect(() => createGame('8/8/8/8/8/8/4P3/4K3 w - - 0 1')).toThrow(/exactly one king/);
+    expect(() => createGame('4k3/8/8/8/8/8/8/2K1K3 w - - 0 1')).toThrow(/exactly one king/);
+    expect(replayMoves(['e2e4'], '8/8/8/8/8/8/4P3/4K3 w - - 0 1')).toMatchObject({
+      ok: false,
+      error: /Invalid start position/,
+    });
+  });
+
   it('returns a fresh, unshared object every call', () => {
     const a = createGame();
     const b = createGame();

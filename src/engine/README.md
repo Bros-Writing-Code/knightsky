@@ -27,7 +27,8 @@ These functions are exported from `gameState.js`.
 | Function | Output | Purpose |
 | --- | --- | --- |
 | `isInCheck(state)` | `boolean` | Returns whether the side to move's king is attacked. |
-| `getGameStatus(state)` | `{ status, winner, drawReason }` | Returns `checkmate`, `stalemate`, `draw` (insufficient material, fifty-move rule, threefold repetition), or `active` for the current position. Checkmate and stalemate take priority. |
+| `getGameStatus(state)` | `{ status, winner, drawReason }` |
+| `materialCount(state)` | `{ white, black, difference }`: piece counts per side (kings excluded) and White's material minus Black's (pawn 1, knight/bishop 3, rook 5, queen 9) | Returns `checkmate`, `stalemate`, `draw` (insufficient material, fifty-move rule, threefold repetition), or `active` for the current position. Checkmate and stalemate take priority. |
 | `isInsufficientMaterial(state)` | `boolean` | True for K vs K, K+B vs K, K+N vs K, or kings plus bishops all on one square color. |
 | `applyMove(state, uci)` | `Result<GameState>`: `{ ok: true, value: newState }` or `{ ok: false, error: string }` | Validates and applies a UCI move without changing `state`; updates the board, turn, special-move fields, history, and game status. |
 
@@ -65,6 +66,7 @@ const { status, winner } = getGameStatus(state);           // 'active' | 'checkm
 | `replayMoves(ucis, startFen = START_FEN)` | `Result<GameState>`; the error names the failing move |
 | `isInCheck(state)` | `boolean` |
 | `getGameStatus(state)` | `{ status, winner, drawReason }` |
+| `materialCount(state)` | `{ white, black, difference }`: piece counts per side (kings excluded) and White's material minus Black's (pawn 1, knight/bishop 3, rook 5, queen 9) |
 | `GameStatetoFEN(state)` | FEN string (to load a FEN, use `createGame(fen)`) |
 | `moveToUCI(move)` / `UCItoMove(uci)` | UCI string / `Move` |
 | `printBoard(state.board)` | ASCII board (debug only) |

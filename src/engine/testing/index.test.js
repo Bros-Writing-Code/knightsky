@@ -12,6 +12,7 @@ import {
   applyMove,
   isInCheck,
   getGameStatus,
+  materialCount,
   GameStatetoFEN,
 } from '../index.js';
 
@@ -54,6 +55,7 @@ describe('public API surface', () => {
       'applyMove',
       'isInCheck',
       'getGameStatus',
+      'materialCount',
       'GameStatetoFEN',
       'moveToUCI',
       'UCItoMove',
@@ -308,5 +310,31 @@ describe('FEN round-trip', () => {
     for (const name of ['toFEN', 'fromFEN', 'FENtoGameState']) {
       expect(engine[name], name).toBeUndefined();
     }
+  });
+});
+
+describe('materialCount', () => {
+  const full = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+
+  it('counts the full set at the start, with no difference', () => {
+    expect(materialCount(createGame())).toEqual({ white: full, black: full, difference: 0 });
+  });
+
+  it('updates after a capture', () => {
+    let state = createGame();
+    for (const uci of ['e2e4', 'd7d5', 'e4d5']) {
+      state = applyMove(state, uci).value;
+    }
+    const count = materialCount(state);
+    expect(count.black.p).toBe(7);
+    expect(count.difference).toBe(1);
+  });
+
+  it('counts a promoted piece as its new type', () => {
+    const before = createGame('8/P6k/8/8/8/8/8/K7 w - - 0 1');
+    expect(materialCount(before).difference).toBe(1);
+    const after = materialCount(applyMove(before, 'a7a8q').value);
+    expect(after.white).toEqual({ p: 0, n: 0, b: 0, r: 0, q: 1 });
+    expect(after.difference).toBe(9);
   });
 });

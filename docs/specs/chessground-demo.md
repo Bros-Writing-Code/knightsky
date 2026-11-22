@@ -21,6 +21,7 @@ It exists so #13 can compare chessground with our own board rendering, so it sta
 | Player vs Player, or the bot at four levels (Easy, Medium, Hard, Max) | |
 | Play White or Play Black against the bot | |
 | Start New Game and Resign buttons | |
+| Sign in with Bluesky (shows who is signed in; not used by the game yet) | |
 
 ## What the page looks like
 
@@ -72,6 +73,7 @@ Chessground only draws the board and handles clicks and drags. It doesn't know t
 | `game.js` | The adapter. Knows the rules by using our own engine in `src/engine` |
 | `clock.js` | Tracks each side's time. Knows nothing about the page |
 | `testing/game.test.js`, `testing/clock.test.js` | Unit tests |
+| `src/atproto/auth.js` | AT Protocol login. See `src/atproto/README.md` |
 | `src/bot/stockfish.js` | The bot. Runs Stockfish in a Web Worker and returns a move for a FEN and level. See `src/bot/README.md` |
 
 **Setup:** `@lichess-org/chessground` is a dependency and `vite` is a dev dependency. `npm run dev` and `npm run build` use the `vite.config.js` at the repo root, which builds this folder (see [Deployment](../deployment.md)). That config also serves the Stockfish files from `src/bot/assets/` at `/stockfish/`.
@@ -159,6 +161,10 @@ Chessground only draws the board and handles clicks and drags. It doesn't know t
 - Load `chessground.base.css`, `chessground.brown.css`, and `chessground.cburnett.css` from the package's `assets` folder.
 - Give `.cg-wrap` a square size in `style.css`, because the base CSS doesn't set one.
 
+## Sign in
+
+The top of the page has a handle field and a **Sign in with Bluesky** button. `main.js` calls `initAuth()` on load. Signing in sends the browser to the player's PDS and back. Once signed in, the form is replaced by `Display Name (@handle)` (or the DID if the profile lookup fails) and a **Sign out** button. Errors show in `#login-error`. The game itself doesn't use the session yet. The reasoning is in [ADR 0008](../adr/0008-atproto-oauth-login.md).
+
 ## Status line
 
 | Situation | Text |
@@ -181,6 +187,7 @@ The reasoning is in [ADR 0004](../adr/0004-chessground-demo-testing.md).
 **Unit tests** (`npm test`)
 
 - **Clock:** starts full and not running, charges time to the right side, switches sides, stops, resets, flags at zero, and never goes below zero.
+- **Auth:** `getProfile` returns the profile, throws on an HTTP error, and passes on a network failure (`src/atproto/testing/auth.test.js`, with `fetch` mocked).
 - **Adapter:** 20 legal moves at the start, a legal move updates the FEN, an illegal move is rejected and changes nothing, a promotion with no letter gives a queen, promotion squares appear only once in `legalMoves()`, and every ending in the status table except time.
 
 **Browser checklist** (`npm run dev`). Each line starts from a new game.
@@ -203,6 +210,9 @@ The reasoning is in [ADR 0004](../adr/0004-chessground-demo-testing.md).
 - [ ] Bot Easy, Play Black: the board turns with Black at the bottom and the bot plays White's first move. You can't move White's pieces.
 - [ ] Bot Max: start a game, then press Start New Game while the bot is thinking. The new board stays at the starting position.
 - [ ] Resign against the bot while it's thinking: the bot's side wins and the bot's answer doesn't appear on the board.
+- [ ] Sign in with a Bluesky handle: after approving at the PDS you return to the page, and it shows your name and handle with a Sign out button.
+- [ ] Refresh the page while signed in: you stay signed in.
+- [ ] Sign out: the handle form comes back. A bad handle shows `Sign in failed: ...` in the page.
 
 ## Before deploying or comparing
 

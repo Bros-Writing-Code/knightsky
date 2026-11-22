@@ -307,7 +307,7 @@ function tokenizePGN(pgn) {
  * Returns the final state and every move as SAN, in canonical form.
  *
  * @param {unknown} pgn
- * @returns {Result<{ state: GameState, sans: string[] }>}
+ * @returns {Result<{ state: GameState, sans: string[], ucis: string[] }>}
  */
 function parsePGN(pgn) {
   if (typeof pgn !== 'string') {
@@ -320,6 +320,7 @@ function parsePGN(pgn) {
 
   let state = createGame();
   const sans = [];
+  const ucis = [];
   for (let i = 0; i < tokens.value.length; i++) {
     const token = tokens.value[i];
     const match = matchSAN(state, token);
@@ -329,9 +330,10 @@ function parsePGN(pgn) {
     }
     // Canonical SAN, whatever the input style: the matched body plus our own check mark.
     sans.push(match.value.body + checkMark(result.value));
+    ucis.push(match.value.uci);
     state = result.value;
   }
-  return { ok: true, value: { state, sans } };
+  return { ok: true, value: { state, sans, ucis } };
 }
 
 /**
@@ -384,4 +386,54 @@ export function appendMove(pgn, uci) {
 
   const nextPGN = formatPGN([...sans, toSAN(state, uci)]);
   return { ok: true, value: { pgn: nextPGN, state: result.value } };
+}
+
+/**
+ * Checks that an updated PGN is the previous one plus exactly one legal move,
+ * and returns that move. Use it whenever an opponent's game record changes:
+ * it rejects rewritten or removed earlier moves, updates with no new move, and
+ * several moves at once. Moves are compared, not text, so tags, comments and
+ * spacing don't matter.
+ *
+ * @param {string} oldPgn - The game as last accepted ("" before the first move).
+ * @param {string} newPgn - The updated record.
+ * @returns {Result<{ uci: string, san: string, color: 'w' | 'b', state: GameState }>}
+ *   `color` is the side that made the move, so callers can check it was that
+ *   player's turn; `state` is the position after it.
+ * @example nextMove('1. e4', '1. e4 e5') // { ok: true, value: { uci: 'e7e5', san: 'e5', color: 'b', state } }
+ */
+export function nextMove(oldPgn, newPgn) {
+  const before = parsePGN(oldPgn);
+  if (!before.ok) {
+    return { ok: false, error: `Previous PGN: ${before.error}` };
+  }
+  const after = parsePGN(newPgn);
+  if (!after.ok) {
+    return after;
+  }
+
+  const previous = before.value.sans;
+  const updated = after.value.sans;
+  const changed = previous.findIndex((san, i) => updated[i] !== san);
+  if (changed !== -1) {
+    return { ok: false, error: `Move ${changed + 1} was changed or removed` };
+  }
+
+  const added = updated.length - previous.length;
+  if (added !== 1) {
+    return {
+      ok: false,
+      error: added === 0 ? 'No new move' : `Expected one new move, found ${added}`,
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      uci: /** @type {string} */ (after.value.ucis.at(-1)),
+      san: /** @type {string} */ (updated.at(-1)),
+      color: before.value.state.currentTurn,
+      state: after.value.state,
+    },
+  };
 }

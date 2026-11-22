@@ -71,6 +71,7 @@ const { status, winner } = getGameStatus(state);           // 'active' | 'checkm
 | `fromSAN(state, san)` | `Result<string>` with the UCI move; accepts `+`/`#`/`!?`, `0-0`, and `e8Q` without `=` |
 | `replayPGN(pgn)` | `Result<GameState>` from the standard start; `''` is a game with no moves; the error names the failing move |
 | `appendMove(pgn, uci)` | `Result<{ pgn, state }>`: checks the whole PGN, adds the move, returns canonical PGN and the new state |
+| `nextMove(oldPgn, newPgn)` | `Result<{ uci, san, color, state }>`: checks the new PGN is the old one plus exactly one legal move; rejects changed or removed moves, no new move, or several |
 | `printBoard(state.board)` | ASCII board (debug only) |
 
 **Promotion:** a pawn moving to the last rank (row 0 for White, row 7 for Black) needs a promotion piece. Append `q`, `r`, `b`, or `n` to the UCI, e.g. `e7e8q`.
@@ -81,6 +82,13 @@ const { status, winner } = getGameStatus(state);           // 'active' | 'checkm
 let { pgn, state } = appendMove('', 'e2e4').value;  // pgn: '1. e4'
 const result = replayPGN(record.pgn);                  // validate an opponent's record
 if (!result.ok) reject(result.error);                  // e.g. 'Move 12 (Nxe9): Illegal or unknown move: Nxe9'
+
+// When an opponent's record changes, accept exactly one new move, made by them:
+const update = nextMove(lastAcceptedPgn, record.pgn);
+if (!update.ok) reject(update.error);                  // e.g. 'Move 3 was changed or removed'
+else if (update.color !== opponentColor) reject('Not their move');
 ```
+
+Always check updates with `nextMove`, not just `replayPGN`: game records can be edited, so a valid PGN could still have rewritten an earlier move.
 
 **Chessground destinations:** group `legalMoves(state)` by the first two characters, e.g. `"e2e4"` → `dests.get("e2").push("e4")`.

@@ -8,6 +8,7 @@ import {
   fromSAN,
   GameStatetoFEN,
   legalMoves,
+  nextMove,
   replayPGN,
   toSAN,
 } from '../index.js';
@@ -232,6 +233,55 @@ describe('appendMove', () => {
       ok: false,
       error: /already over/,
     });
+  });
+});
+
+describe('nextMove', () => {
+  it('returns the one new move, who made it, and the new position', () => {
+    const first = nextMove('', '1. e4');
+    expect(first).toMatchObject({ ok: true, value: { uci: 'e2e4', san: 'e4', color: 'w' } });
+
+    const reply = nextMove('1. e4', '1. e4 e5');
+    expect(reply).toMatchObject({ ok: true, value: { uci: 'e7e5', san: 'e5', color: 'b' } });
+    expect(GameStatetoFEN(reply.value.state)).toBe(
+      GameStatetoFEN(/** @type {any} */ (replayPGN('1. e4 e5')).value),
+    );
+  });
+
+  it('compares moves, not text: tags, comments, spacing and check marks may differ', () => {
+    const result = nextMove('1. e4 e5', '[Event "x"]\n1.e4 {main line} e5   2. Nf3');
+    expect(result).toMatchObject({ ok: true, value: { uci: 'g1f3', san: 'Nf3' } });
+
+    const check = nextMove('1. e4 f5', '1. e4 f5 2. Qh5');
+    expect(check).toMatchObject({ ok: true, value: { san: 'Qh5+' } });
+  });
+
+  it('rejects a changed or removed earlier move', () => {
+    expect(nextMove('1. e4 e5', '1. d4 e5 2. Nf3')).toEqual({
+      ok: false,
+      error: 'Move 1 was changed or removed',
+    });
+    expect(nextMove('1. e4 e5 2. Nf3', '1. e4 e5')).toEqual({
+      ok: false,
+      error: 'Move 3 was changed or removed',
+    });
+  });
+
+  it('rejects no new move, or more than one', () => {
+    expect(nextMove('1. e4', '1. e4')).toEqual({ ok: false, error: 'No new move' });
+    expect(nextMove('1. e4', '1. e4 e5 2. Nf3')).toEqual({
+      ok: false,
+      error: 'Expected one new move, found 2',
+    });
+  });
+
+  it('rejects an illegal new move, a move after the game ended, or a bad previous PGN', () => {
+    expect(nextMove('1. e4', '1. e4 e4')).toMatchObject({ ok: false, error: /Move 2 \(e4\)/ });
+    expect(nextMove('1. f3 e5 2. g4 Qh4#', '1. f3 e5 2. g4 Qh4# 3. a3')).toMatchObject({
+      ok: false,
+      error: /already over/,
+    });
+    expect(nextMove('1. e5', '1. e5 e5')).toMatchObject({ ok: false, error: /^Previous PGN: / });
   });
 });
 

@@ -1,9 +1,23 @@
 # AT Protocol Integration
 
-Author: James Keys
+Authors: James Keys and Adarsh Shetkar
 
 - [Lexicon options](lexicon-options.md)
-- OAuth (TODO)
+- [OAuth login](#oauth-login)
+
+## OAuth Sign In 
+
+[auth.js](./auth.js) signs a player in with their AT Protocol account. The app is a browser-only public client (no server, no secret), see [ADR 0007](../../docs/adr/0007-atproto-oauth-sign-in.md).
+
+| Function | What it does |
+| --- | --- |
+| `initAuth()` | Call once on page load. Finishes a login redirect if the URL has one, otherwise restores the saved session. Returns the session, or `undefined` when nobody is signed in. |
+| `signIn(handle)` | Sends the browser to the player's PDS to approve the login. The page comes back through `initAuth()`. |
+| `getProfile(did)` | Looks up `{ handle, displayName? }` from Bluesky's public AppView. Needs no login and throws if the lookup fails. |
+| `signOut(session)` | Signs the session out. |
+| `onSessionDeleted(callback)` | Runs on a session deletion (happens on any sign out attempt, even if failed) |
+
+The session only carries the DID (`session.sub`), so use `getProfile` to show a name. Only the `atproto` scope is requested for now. Locally the library's loopback client is used. In production `client-metadata.json` is generated from `SITE_URL`, see [Deployment](../../docs/deployment.md).
 
 ## Lexicon
 
@@ -36,6 +50,10 @@ Author: James Keys
 | `badPrev` | The move history does not extend the last accepted history by exactly one ply. |
 | `illegalMove` | The appended move is illegal. |
 | `badFEN` | The supplied FEN differs from the position computed from PGN. |
+
+## Auth Tests
+
+[auth.test.js](./testing/auth.test.js) tests `getProfile` with a mocked `fetch`: a successful lookup (and the request URL), an HTTP error, and a network failure. The OAuth redirect flow needs a real browser and PDS, so it is checked by hand (see the browser checklist in the [demo spec](../../docs/specs/chessground-demo.md)).
 
 ## Lexicon Tests
 

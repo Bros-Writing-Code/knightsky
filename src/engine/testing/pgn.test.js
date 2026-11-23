@@ -234,6 +234,16 @@ describe('appendMove', () => {
       error: /already over/,
     });
   });
+
+  it('refuses a move after a final result (resignation or agreed draw), but not after *', () => {
+    for (const result of ['1-0', '0-1', '1/2-1/2']) {
+      expect(appendMove(`1. e4 ${result}`, 'e7e5')).toEqual({
+        ok: false,
+        error: `The game is already over (${result})`,
+      });
+    }
+    expect(appendMove('1. e4 *', 'e7e5')).toMatchObject({ ok: true, value: { pgn: '1. e4 e5' } });
+  });
 });
 
 describe('nextMove', () => {
@@ -282,6 +292,20 @@ describe('nextMove', () => {
       error: /already over/,
     });
     expect(nextMove('1. e5', '1. e5 e5')).toMatchObject({ ok: false, error: /^Previous PGN: / });
+  });
+
+  it('rejects any move after a final result, even if the update drops the result', () => {
+    const over = { ok: false, error: 'The game is already over (1-0)' };
+    expect(nextMove('1. e4 1-0', '1. e4 e5')).toEqual(over);
+    expect(nextMove('1. e4 1-0', '1. e4 e5 1-0')).toEqual(over);
+    expect(nextMove('1. e4 e5 1/2-1/2', '1. e4 e5 2. Nf3')).toMatchObject({
+      ok: false,
+      error: /already over \(1\/2-1\/2\)/,
+    });
+  });
+
+  it('still accepts a move after "*" (game in progress)', () => {
+    expect(nextMove('1. e4 *', '1. e4 e5 *')).toMatchObject({ ok: true, value: { uci: 'e7e5' } });
   });
 });
 

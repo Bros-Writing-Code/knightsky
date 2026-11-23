@@ -23,6 +23,8 @@ import { moveGenerator } from './moveGeneration.js';
  */
 
 const RESULT_TOKENS = new Set(['1-0', '0-1', '1/2-1/2', '*']);
+/** Results that end the game; "*" means it is still going. */
+const FINAL_RESULTS = new Set(['1-0', '0-1', '1/2-1/2']);
 
 /* ─────────────────────────── UCI → SAN ─────────────────────────── */
 
@@ -276,10 +278,10 @@ function moveText(pgn) {
 /**
  * Splits PGN text into move tokens. Skips tag pairs, comments, NAGs ($1) and
  * move numbers ("1.", "1...", including "1.e4"). A result token (1-0, 0-1,
- * 1/2-1/2, *) may only come last.
+ * 1/2-1/2, *) may only come last, and is returned separately.
  *
  * @param {string} pgn
- * @returns {Result<string[]>}
+ * @returns {Result<{ moves: string[], result: string | null }>}
  */
 function tokenizePGN(pgn) {
   const text = moveText(pgn);
@@ -299,15 +301,18 @@ function tokenizePGN(pgn) {
   if (resultAt !== -1 && resultAt !== tokens.length - 1) {
     return { ok: false, error: `Moves found after the result ${tokens[resultAt]}` };
   }
-  return { ok: true, value: resultAt === -1 ? tokens : tokens.slice(0, -1) };
+  return resultAt === -1
+    ? { ok: true, value: { moves: tokens, result: null } }
+    : { ok: true, value: { moves: tokens.slice(0, -1), result: tokens[resultAt] } };
 }
 
 /**
  * Replays PGN text from the standard starting position.
- * Returns the final state and every move as SAN, in canonical form.
+ * Returns the final state, every move as SAN in canonical form, and the
+ * result token if there is one ("1-0", "0-1", "1/2-1/2", "*" or null).
  *
  * @param {unknown} pgn
- * @returns {Result<{ state: GameState, sans: string[], ucis: string[] }>}
+ * @returns {Result<{ state: GameState, sans: string[], ucis: string[], result: string | null }>}
  */
 function parsePGN(pgn) {
   if (typeof pgn !== 'string') {
@@ -321,8 +326,9 @@ function parsePGN(pgn) {
   let state = createGame();
   const sans = [];
   const ucis = [];
-  for (let i = 0; i < tokens.value.length; i++) {
-    const token = tokens.value[i];
+  const { moves, result: gameResult } = tokens.value;
+  for (let i = 0; i < moves.length; i++) {
+    const token = moves[i];
     const match = matchSAN(state, token);
     const result = match.ok ? applyMove(state, match.value.uci) : match;
     if (!result.ok) {
@@ -333,7 +339,21 @@ function parsePGN(pgn) {
     ucis.push(match.value.uci);
     state = result.value;
   }
-  return { ok: true, value: { state, sans, ucis } };
+  return { ok: true, value: { state, sans, ucis, result: gameResult } };
+}
+
+/**
+ * An error if the PGN ends with a final result (1-0, 0-1, 1/2-1/2), e.g. after
+ * a resignation or an agreed draw, since no move may follow it. Checkmate and
+ * stalemate are already caught by applyMove.
+ *
+ * @param {string | null} result
+ * @returns {Result<null>}
+ */
+function checkNotFinished(result) {
+  return result !== null && FINAL_RESULTS.has(result)
+    ? { ok: false, error: `The game is already over (${result})` }
+    : { ok: true, value: null };
 }
 
 /**
@@ -366,6 +386,7 @@ export function replayPGN(pgn) {
  * Adds one move to a PGN game and returns the new PGN text with the new
  * position. The whole PGN is checked first, and the output is always in
  * canonical form ("1. e4 e5 2. Nf3"), so comments and tags are dropped.
+ * A PGN that ends with a final result (1-0, 0-1, 1/2-1/2) takes no more moves.
  *
  * @param {string} pgn - The game so far ("" before the first move).
  * @param {string} uci - The move to add, e.g. "g1f3".
@@ -376,6 +397,11 @@ export function appendMove(pgn, uci) {
   const parsed = parsePGN(pgn);
   if (!parsed.ok) {
     return parsed;
+  }
+
+  const finished = checkNotFinished(parsed.value.result);
+  if (!finished.ok) {
+    return finished;
   }
 
   const { state, sans } = parsed.value;
@@ -391,8 +417,9 @@ export function appendMove(pgn, uci) {
 /**
  * Checks that an updated PGN is the previous one plus exactly one legal move,
  * and returns that move. Use it whenever an opponent's game record changes:
- * it rejects rewritten or removed earlier moves, updates with no new move, and
- * several moves at once. Moves are compared, not text, so tags, comments and
+ * it rejects rewritten or removed earlier moves, updates with no new move,
+ * several moves at once, and any move after the previous PGN's final result
+ * (1-0, 0-1, 1/2-1/2), even if the update drops that result. Moves are compared, not text, so tags, comments and
  * spacing don't matter.
  *
  * @param {string} oldPgn - The game as last accepted ("" before the first move).
@@ -406,6 +433,10 @@ export function nextMove(oldPgn, newPgn) {
   const before = parsePGN(oldPgn);
   if (!before.ok) {
     return { ok: false, error: `Previous PGN: ${before.error}` };
+  }
+  const finished = checkNotFinished(before.value.result);
+  if (!finished.ok) {
+    return finished;
   }
   const after = parsePGN(newPgn);
   if (!after.ok) {

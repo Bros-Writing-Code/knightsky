@@ -61,6 +61,22 @@ Black   10:00
 [ Start New Game ] [ Resign ]
 ```
 
+### Sign In Headers
+
+#### Before Sign In 
+
+Curly braces represent a text field.
+
+```
+Handle { alice.bsky.social } [ Sign in with Bluesky ]
+```
+
+#### After Sign In
+
+```
+Signed in as Alice (@alice.bsky.social) [Sign out]
+```
+
 ## Who does what
 
 Chessground only draws the board and handles clicks and drags. It doesn't know the rules of chess, so the rest is ours.
@@ -73,10 +89,14 @@ Chessground only draws the board and handles clicks and drags. It doesn't know t
 | `game.js` | The adapter. Knows the rules by using our own engine in `src/engine` |
 | `clock.js` | Tracks each side's time. Knows nothing about the page |
 | `testing/game.test.js`, `testing/clock.test.js` | Unit tests |
-| `src/atproto/auth.js` | AT Protocol login. See `src/atproto/README.md` |
+| `src/atproto/auth.js` | AT Protocol sign in. See `src/atproto/README.md` |
 | `src/bot/stockfish.js` | The bot. Runs Stockfish in a Web Worker and returns a move for a FEN and level. See `src/bot/README.md` |
 
 **Setup:** `@lichess-org/chessground` is a dependency and `vite` is a dev dependency. `npm run dev` and `npm run build` use the `vite.config.js` at the repo root, which builds this folder (see [Deployment](../deployment.md)). That config also serves the Stockfish files from `src/bot/assets/` at `/stockfish/`.
+
+`vite.config.js` is responsible for generating the `client-metadata.json` file that is necessary for OAuth. We have no server or secret, so this file sits at a fixed URL and stands in for registering the app ahead of time. On their client, a user types in a handle into the sign in field, the OAuth library finds their server and tells it, "I'm `https://[SITE_URL]/client-metadata.json`." The server downloads the file and checks it, then shows the user the consent screen. When the user authorizes, the server sends them back to `https://[SITE_URL]]`.
+
+`vite.config.js` also finds the app version from `package.json` and injects the value into the website's footer.
 
 ## The adapter (`game.js`)
 
@@ -163,7 +183,7 @@ Chessground only draws the board and handles clicks and drags. It doesn't know t
 
 ## Sign in
 
-The top of the page has a handle field and a **Sign in with Bluesky** button. `main.js` calls `initAuth()` on load. Signing in sends the browser to the player's PDS and back. Once signed in, the form is replaced by `Display Name (@handle)` (or the DID if the profile lookup fails) and a **Sign out** button. Errors show in `#login-error`. The game itself doesn't use the session yet. The reasoning is in [ADR 0008](../adr/0008-atproto-oauth-login.md).
+The top of the page has a handle field and a **Sign in with Bluesky** button. `main.js` calls `initAuth()` on load. Signing in sends the browser to the player's PDS and back. Once signed in, the form is replaced by `Display Name (@handle)` (or the DID if the profile lookup fails) and a **Sign out** button. Errors show in `#login-error`. The game itself doesn't use the session yet. The reasoning is in [ADR 0007](../adr/0007-atproto-oauth-sign-in.md). Attempting to sign out deletes the session, whether the revoke request succeeds or fails. Once the session is deleted, the user is signed out on any open tab.
 
 ## Status line
 
@@ -213,6 +233,7 @@ The reasoning is in [ADR 0004](../adr/0004-chessground-demo-testing.md).
 - [ ] Sign in with a Bluesky handle: after approving at the PDS you return to the page, and it shows your name and handle with a Sign out button.
 - [ ] Refresh the page while signed in: you stay signed in.
 - [ ] Sign out: the handle form comes back. A bad handle shows `Sign in failed: ...` in the page.
+- [ ] Sign out: Signing out in one tab signs out of every open tab without reloading any of them.
 
 ## Before deploying or comparing
 

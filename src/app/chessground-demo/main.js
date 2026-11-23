@@ -321,11 +321,11 @@ loginForm.addEventListener('submit', async (event) => {
 byId('logout').addEventListener('click', async () => {
   try {
     if (session) {
-      await signOut(session);
+      await signOut(session); // always deletes the session even on a failure.
     }
     session = undefined;
   } catch (error) {
-    showLoginError(error); // stay signed in in the UI, since the session may still be valid
+    showLoginError(error);
   }
   renderAccount();
 });

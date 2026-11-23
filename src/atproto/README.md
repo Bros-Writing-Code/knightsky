@@ -5,9 +5,9 @@ Authors: James Keys and Adarsh Shetkar
 - [Lexicon options](lexicon-options.md)
 - [OAuth login](#oauth-login)
 
-## OAuth login
+## OAuth Sign In 
 
-[auth.js](./auth.js) signs a player in with their AT Protocol account. The app is a browser-only public client (no server, no secret), see [ADR 0008](../../docs/adr/0008-atproto-oauth-login.md).
+[auth.js](./auth.js) signs a player in with their AT Protocol account. The app is a browser-only public client (no server, no secret), see [ADR 0007](../../docs/adr/0007-atproto-oauth-sign-in.md).
 
 | Function | What it does |
 | --- | --- |
@@ -15,6 +15,7 @@ Authors: James Keys and Adarsh Shetkar
 | `signIn(handle)` | Sends the browser to the player's PDS to approve the login. The page comes back through `initAuth()`. |
 | `getProfile(did)` | Looks up `{ handle, displayName? }` from Bluesky's public AppView. Needs no login and throws if the lookup fails. |
 | `signOut(session)` | Signs the session out. |
+| `onSessionDeleted(callback)` | Runs on a session deletion (happens on any sign out attempt, even if failed) |
 
 The session only carries the DID (`session.sub`), so use `getProfile` to show a name. Only the `atproto` scope is requested for now. Locally the library's loopback client is used. In production `client-metadata.json` is generated from `SITE_URL`, see [Deployment](../../docs/deployment.md).
 

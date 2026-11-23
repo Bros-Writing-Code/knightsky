@@ -315,9 +315,15 @@ describe('FEN round-trip', () => {
 
 describe('materialCount', () => {
   const full = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+  const none = { p: 0, n: 0, b: 0, r: 0, q: 0 };
 
   it('counts the full set at the start, with no difference', () => {
-    expect(materialCount(createGame())).toEqual({ white: full, black: full, difference: 0 });
+    expect(materialCount(createGame())).toEqual({
+      white: full,
+      black: full,
+      ahead: { white: none, black: none },
+      difference: 0,
+    });
   });
 
   it('updates after a capture', () => {
@@ -327,7 +333,18 @@ describe('materialCount', () => {
     }
     const count = materialCount(state);
     expect(count.black.p).toBe(7);
+    expect(count.ahead).toEqual({ white: { ...none, p: 1 }, black: none });
     expect(count.difference).toBe(1);
+  });
+
+  it('stays correct after a promotion with no capture (review on #103)', () => {
+    // White promoted a pawn and nothing was captured: 7 pawns and 2 queens against the full set.
+    const count = materialCount(
+      createGame('rnbqkbnr/pppppppp/8/8/3Q4/8/1PPPPPPP/RNBQKBNR b KQkq - 0 1'),
+    );
+    expect(count.white).toEqual({ p: 7, n: 2, b: 2, r: 2, q: 2 });
+    expect(count.ahead).toEqual({ white: { ...none, q: 1 }, black: { ...none, p: 1 } });
+    expect(count.difference).toBe(8);
   });
 
   it('counts a promoted piece as its new type', () => {

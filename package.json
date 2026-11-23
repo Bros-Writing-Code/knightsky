@@ -29,7 +29,6 @@
   },
   "homepage": "https://github.com/Bros-Writing-Code/chess-using-at-protocol#readme",
   "devDependencies": {
-    "@atproto/lexicon": "^0.6.2",
     "@eslint/js": "^10.0.1",
     "@vitest/eslint-plugin": "^1.6.28",
     "eslint": "^10.15.0",
@@ -42,6 +41,7 @@
     "vitest": "^2.1.8"
   },
   "dependencies": {
+    "@atproto/lexicon": "^0.6.2",
     "@atproto/oauth-client-browser": "^0.5.17",
     "@lichess-org/chessground": "^10.5.0",
     "chess.js": "^1.4.0"

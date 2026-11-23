@@ -28,11 +28,12 @@ Pages only serves files that exist. A path like `.../game/abc` has no file, so p
 
 Either way, build in app links from `import.meta.env.BASE_URL`, not a hard coded `/`.
 
-### 2. ATProto login metadata needs to match the deployed URL
+### 2. ATProto metadata needs to match the deployed URL
 
-ATProto OAuth identifies the app by its `client_id`, the URL of a `client-metadata.json` that the site hosts. That `client_id` and the `redirect_uris` must use the exact URL the app is served from, or login fails.
+ATProto OAuth identifies the app by its `client_id`, the URL of a `client-metadata.json` that the site hosts. That `client_id` and the `redirect_uris` must use the exact URL the app is served from, or sign in fails.
 
-- Generate the metadata from `SITE_URL` at build time. Never hard-code the URL. Vite only exposes `VITE_*` variables to app code, so this needs a `define` in `vite.config.js` or a renamed variable.
+- `vite.config.js` generates `client-metadata.json` from `SITE_URL` at build time (see [ADR 0007](adr/0007-atproto-oauth-sign-in.md)). Never hard-code the URL. The build fails if `SITE_URL` doesn't end with `/`. If `SITE_URL` is unset, no metadata file is emitted.
+- `auth.js` builds the `client_id` from `import.meta.env.BASE_URL` and the page's origin, so it matches the generated file.
 - Local dev uses ATProto's special localhost client instead of the deployed metadata.
 - Changing the domain changes the `client_id`, so everyone has to log in again.
 

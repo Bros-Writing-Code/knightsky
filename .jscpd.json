@@ -1,0 +1,16 @@
+{
+  "path": ["src"],
+  "format": ["javascript"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/coverage/**",
+    "**/bot/assets/**",
+    "**/.delta/**"
+  ],
+  "reporters": ["console", "markdown"],
+  "output": "reports/duplicates",
+  "minLines": 5,
+  "minTokens": 50,
+  "failOnEmpty": true
+}

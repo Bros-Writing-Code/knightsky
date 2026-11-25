@@ -3,11 +3,23 @@ import { describe, it, expect } from 'vitest';
 import { sqIndex, toIndex, emptyBoard, withPiece } from '../0x88helper.js';
 import { moveGenerator } from '../moveGeneration.js';
 
+/**
+ * @param {import('../types.js').PieceType} type
+ * @returns {import('../types.js').Piece}
+ */
 const W = (type) => ({ type, color: 'w' });
+/**
+ * @param {import('../types.js').PieceType} type
+ * @returns {import('../types.js').Piece}
+ */
 const B = (type) => ({ type, color: 'b' });
 const withKings = (board) =>
   withPiece(withPiece(board, sqIndex('a1'), W('k')), sqIndex('h8'), B('k'));
 
+/**
+ * @param {import('../types.js').Board} board
+ * @param {number | null} [enPassantTarget=null]
+ */
 const createMockState = (board, enPassantTarget = null) => ({
   board,
   currentTurn: 'w',

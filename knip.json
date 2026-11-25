@@ -1,0 +1,11 @@
+{
+  "entry": ["src/app/chessground-demo/main.js", "src/**/*.test.js", "*.config.js"],
+  "project": ["src/**/*.js", "*.config.js"],
+  "ignore": ["src/bot/assets/**", "**/.delta/**"],
+  "rules": {
+    "files": "warn",
+    "dependencies": "warn",
+    "devDependencies": "warn",
+    "optionalPeerDependencies": "warn"
+  }
+}

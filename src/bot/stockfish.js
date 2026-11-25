@@ -345,7 +345,10 @@ export function createStockfishBot({ createTransport = () => createWorkerTranspo
     }
   }
 
-  /** Chain of requests, so concurrent calls never mix up their answers. */
+  /**
+   * Chain of requests, so concurrent calls never mix up their answers.
+   * @type {Promise<string | void>}
+   */
   let queue = Promise.resolve();
 
   return {

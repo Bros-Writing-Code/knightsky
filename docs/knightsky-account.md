@@ -17,6 +17,8 @@ The [account repo](https://pdsls.dev/at://did:plc:4jwu5r3kihk5btmr7nqtvt2r/com.a
 
 Published schemas should only change in backwards-compatible ways, such as adding optional fields. Don't rename, remove, or tighten existing fields.
 
+**One-time exception (#72, 2026-11-22):** `app.knightsky.game` `status` changed from `active | resigned` to `active | drawOffered | ended`; a resignation is now `status: "ended"` with `termination: "resignation"`. Removing `resigned` breaks the rule above. We accepted that once because no client wrote game records yet (#73). Publish the new schemas once with the script below just before merging.
+
 ```zsh
 PDS=https://discina.us-west.host.bsky.network
 DID=did:plc:4jwu5r3kihk5btmr7nqtvt2r

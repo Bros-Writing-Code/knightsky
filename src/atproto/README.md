@@ -103,7 +103,7 @@ What follows is a description of the communication flow between clients.
 7. Alice's client listens for `game` records from Bob's DID whose `challenge` points at her record.
 8. Alice makes a move on the UI.
 9. The client updates her `game` record by appending the move on the PGN notation and rewriting the FEN.
-10. Bob's client detects the update with his polling loop.
+10. Bob's client detects the update with his listener.
 11. If Alice updated her status to `ended`, the game is over. Bob's client checks her `termination` and `result`, then marks his own record `ended`.
 12. Bob's client compares the PGN to his PGN.
     1. It checks whether it was Alice's turn. (fail -> wrongTurn)
@@ -115,7 +115,7 @@ What follows is a description of the communication flow between clients.
     2. It checks whether the status of the game is still accurate, especially looking for premature termination conditions (fail -> noDrawOffer or something similar)
 14. Bob makes a move on the UI.
 
-If Alice's polling loop notices that Bob rejected her move while she's waiting for him to take his turn, she would ideally rectify the mistake by making another update to her game record.
+If Alice's listener notices that Bob rejected her move while she's waiting for him to take his turn, she would ideally rectify the mistake by making another update to her game record.
 
 - If her most recent move is an illegal move, she could just choose a different move
 - If she miscomputed the FEN, she could try computing it again
@@ -160,6 +160,33 @@ If Alice's Jetstream listener notices that Bob rejected her move while she's wai
 - If she appended too much information to the PGN, she could fix those kinds of errors
 - If Alice and Bob disagree on the history of the game up to that point, we sort of reach an unresolvable deadlock, especially if Bob keeps sending more reject records. At that point, it would be best to leave the game unfinished. We don't auto-end the game. We should only end games if there's a clear winner via checkmate, an agreed upon draw (currently planned), a timeout (currently planned), or one of the players forfeits.
 If Alice fixes her error and writes the fix to her repo, then Bob would take his turn and play would continue as normal.
+
+## Game Watcher
+
+[watchGames.js](./watchGames.js) keeps every ongoing game of the signed-in player up to date while the tab is open. Call `watchGames({ myDid, onChange, onError })` once after sign in. It returns:
+
+- `add(myRecordUri)`: watch a game created in this tab.
+- `list()`: a snapshot of every game.
+- `stop()`: call it on sign out.
+
+It finds your games in your own repo, reads each opponent's side from their PDS, then follows one Jetstream v2 subscription filtered to your DID and your opponents' DIDs. Every change arrives through `onChange(gameId, { type, game, rejection? })`, where `type` is `added`, `myRecordUpdated`, `opponentUpdated` or `rejected`.
+
+The module checks records against the lexicons but knows nothing about chess, so the UI validates moves with the engine. [pds.js](./pds.js) holds the public PDS reads it uses.
+
+See the [spec](../../docs/specs/multi-game-listener.md) for the design and its trade-offs.
+
+## Game Watcher Tests
+
+Run the tests with `npm test -- src/atproto/testing/watchGames.test.js src/atproto/testing/pds.test.js`.
+
+The tests drive the real `@atcute/jetstream` client with a fake WebSocket and a fake `fetch` from [fakes.js](./testing/fakes.js). They cover:
+
+- discovery at startup;
+- live updates and acceptances;
+- adding games, from this tab or another device;
+- rejections, including ones that arrive before the version they reject;
+- PDS reads racing the stream;
+- reconnect, fallback and retry behavior.
 
 ## Auth Tests
 

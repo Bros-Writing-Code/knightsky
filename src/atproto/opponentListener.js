@@ -91,8 +91,12 @@ const lexicons = new Lexicons(
  * - opponentDid: the opponent's DID, when their record is not known yet.
  * - onUpdate: a new version of the opponent's record.
  * - onRejection: the opponent rejected the current version of your record.
+ * - onError: something went wrong; see the codes above. The listener keeps running.
+ * - fetch: defaults to the browser's fetch; tests can inject a stand-in.
  * - jetstreamUrl: optional Jetstream v2 `subscribeEvents` websocket endpoint.
  * - webSocket: defaults to the browser's WebSocket; tests can inject a stand-in.
+ *
+ * Throws a TypeError right away if the options are invalid.
  *
  * @param {WatchOptions} options
  * @returns {() => void} stop
@@ -112,6 +116,10 @@ export function watchOpponentGame(options) {
 }
 
 /**
+ * Validates the options and builds the Context: the mutable state shared by every helper for
+ * one watched game. Throws a TypeError for invalid options, so mistakes surface when the UI
+ * calls watchOpponentGame() and not later as silent missing events.
+ *
  * @param {WatchOptions} options
  * @returns {Context}
  */
@@ -165,6 +173,9 @@ function createContext(options) {
 }
 
 /**
+ * Picks the Jetstream endpoint and WebSocket constructor, using the defaults when they are not
+ * given. Throws a TypeError if the URL is not ws:/wss: or no WebSocket is available.
+ *
  * @param {WatchOptions} options
  * @returns {{ webSocket: typeof WebSocket, jetstreamUrl: string }}
  */
@@ -186,9 +197,13 @@ function getJetstreamOptions(options) {
   return { webSocket, jetstreamUrl: parsedJetstreamUrl.href };
 }
 
-/** Uses regex to extract the did and record key from an atproto URI (if it's a app.knightsky.game record.)
+/**
+ * Splits the AT-URI of an app.knightsky.game record into its DID and record key. Throws a
+ * TypeError naming the option if `uri` is not a string, not an AT-URI, or in another collection.
+ *
  * @param {unknown} uri
- * @param {string} name
+ * @param {string} name option name, used in the error message
+ * @returns {{ did: string, rkey: string }}
  */
 function parseGameUri(uri, name) {
   const match = typeof uri === 'string' ? AT_URI.exec(uri) : null;
@@ -198,7 +213,13 @@ function parseGameUri(uri, name) {
   return { did: match[1], rkey: match[3] };
 }
 
-/** @param {Context} ctx */
+/**
+ * Opens a Jetstream WebSocket filtered to commits on the opponent's game and reject collections.
+ * On a reconnect it passes the last cursor so Jetstream replays the events missed meanwhile. If
+ * the socket cannot even be created, it reports a NetworkError and schedules another try.
+ *
+ * @param {Context} ctx
+ */
 function connect(ctx) {
   if (ctx.stopped) {
     return;
@@ -228,6 +249,8 @@ function connect(ctx) {
 }
 
 /**
+ * Connects the socket's open, message, error and close events to the listener's handlers.
+ *
  * @param {Context} ctx
  * @param {WebSocket} socket
  */
@@ -239,6 +262,10 @@ function attachSocketHandlers(ctx, socket) {
 }
 
 /**
+ * Runs when the socket connects. On the first connection it starts bootstrap(), which reads the
+ * current state from the PDS and then processes the buffered events. On a reconnect the state is
+ * already known, so it skips the PDS read and processes the buffered events right away.
+ *
  * @param {Context} ctx
  * @param {WebSocket} socket
  */
@@ -257,6 +284,10 @@ function onSocketOpen(ctx, socket) {
 }
 
 /**
+ * Runs for each Jetstream message. Reports non-text or non-JSON messages as UnexpectedError,
+ * remembers the newest cursor for reconnects, and ignores anything that is not a commit. Commits
+ * are queued for processing, or buffered in pendingEvents while the bootstrap is still running.
+ *
  * @param {Context} ctx
  * @param {MessageEvent} event
  */
@@ -295,6 +326,10 @@ function onSocketMessage(ctx, event) {
 }
 
 /**
+ * Runs when the socket fails. Reports one NetworkError and closes the socket, which triggers
+ * onSocketClose() and a reconnect. Setting socketErrorReported stops onSocketClose() from
+ * reporting the same failure a second time.
+ *
  * @param {Context} ctx
  * @param {WebSocket} socket
  * @param {Event} event
@@ -314,7 +349,13 @@ function onSocketError(ctx, socket, event) {
   socket.close();
 }
 
-/** @param {Context} ctx */
+/**
+ * Runs when the socket closes for any reason other than stop(). Marks the listener not ready, so
+ * new events are buffered, reports a NetworkError unless one was already reported for this
+ * socket, and schedules a reconnect.
+ *
+ * @param {Context} ctx
+ */
 function onSocketClose(ctx) {
   if (ctx.stopped) {
     return;
@@ -334,9 +375,11 @@ function onSocketClose(ctx) {
   scheduleReconnect(ctx);
 }
 
-/** Iterates over pendingEvents, removing them and enqueuing each one with enqueueEvent.
+/**
+ * Moves every buffered event from pendingEvents into the processing queue, in arrival order.
+ *
  * @param {Context} ctx
-*/
+ */
 function flushPendingEvents(ctx) {
   for (const message of ctx.pendingEvents.splice(0)) {
     enqueueEvent(ctx, message);
@@ -344,8 +387,16 @@ function flushPendingEvents(ctx) {
 }
 
 /**
+ * Reads the opponent's current game record and rejections from their PDS, in parallel, so the
+ * UI gets the state as it was before the stream started. Stream events that arrive meanwhile are
+ * buffered and processed afterwards, so nothing is lost.
+ *
+ * If any read fails, the errors are reported and the socket is closed, so the reconnect retries
+ * the whole bootstrap. Results are dropped if stop() was called or a newer socket replaced this
+ * one while the reads were in flight.
+ *
  * @param {Context} ctx
- * @param {WebSocket} socket
+ * @param {WebSocket} socket the socket this bootstrap belongs to
  */
 async function bootstrap(ctx, socket) {
   const results = await Promise.allSettled([bootstrapGame(ctx), bootstrapRejections(ctx)]);
@@ -367,7 +418,13 @@ async function bootstrap(ctx, socket) {
   flushPendingEvents(ctx);
 }
 
-/** @param {Context} ctx */
+/**
+ * Reports the opponent's current game record. If it is already known, it is fetched directly; a
+ * missing record is reported as RecordNotFound without failing the bootstrap. Otherwise it
+ * searches for the opponent's acceptance, and if there is none yet the live stream will find it.
+ *
+ * @param {Context} ctx
+ */
 async function bootstrapGame(ctx) {
   if (ctx.opponentUri) {
     try {
@@ -390,7 +447,13 @@ async function bootstrapGame(ctx) {
   }
 }
 
-/** @param {Context} ctx */
+/**
+ * Reports rejections the opponent made before the listener started. It collects rejections newer
+ * than my record (newest first, stopping at one already seen), then checks them oldest first.
+ * My own record is fetched at most once, and only if a rejection needs checking.
+ *
+ * @param {Context} ctx
+ */
 async function bootstrapRejections(ctx) {
   /** @type {FetchedRecord[]} */
   const unseen = [];
@@ -410,7 +473,12 @@ async function bootstrapRejections(ctx) {
   }
 }
 
-/** @param {Context} ctx */
+/**
+ * Calls connect() again after an exponential backoff: 1s, 2s, 4s, … up to 30s. The count resets
+ * after a successful connection. Does nothing if a reconnect is already scheduled.
+ *
+ * @param {Context} ctx
+ */
 function scheduleReconnect(ctx) {
   if (ctx.stopped || ctx.reconnectTimer !== undefined) {
     return;
@@ -424,8 +492,14 @@ function scheduleReconnect(ctx) {
 }
 
 /**
+ * Adds a Jetstream commit to the processing queue. Events are processed one at a time, in order,
+ * by chaining them onto ctx.processing, so an async rejection check cannot be overtaken by a
+ * later event. If processing fails, the error is reported and the event is retried later with
+ * exponential backoff.
+ *
  * @param {Context} ctx
- * @param {any} message
+ * @param {any} message Jetstream commit payload
+ * @param {number} [attempt] retries so far, used for the backoff delay
  */
 function enqueueEvent(ctx, message, attempt = 0) {
   ctx.processing = ctx.processing
@@ -447,8 +521,12 @@ function enqueueEvent(ctx, message, attempt = 0) {
 }
 
 /**
+ * Handles one Jetstream commit. Ignores commits that are not from the opponent's repo or not in
+ * the game or reject collections (Jetstream already filters, but its data is untrusted), then
+ * passes the commit to the game or rejection handler.
+ *
  * @param {Context} ctx
- * @param {any} message
+ * @param {any} message Jetstream commit payload
  */
 async function processEvent(ctx, message) {
   if (ctx.stopped || message?.did !== ctx.opponentDid) {
@@ -470,6 +548,13 @@ async function processEvent(ctx, message) {
 }
 
 /**
+ * Handles a commit to the opponent's game collection:
+ * - Deleting the watched record is reported as RecordNotFound.
+ * - A new version of the watched record is passed to handleGameVersion().
+ * - If the record is not known yet, a valid record that accepts my challenge, is newer than my
+ *   record, and names me as the opponent becomes the watched record.
+ * Other records in the collection, such as games with other players, are ignored.
+ *
  * @param {Context} ctx
  * @param {{ uri: string, rkey: string, operation: string, cid: string, record: any }} event
  */
@@ -505,6 +590,10 @@ function processGameEvent(ctx, { uri, rkey, operation, cid, record }) {
 }
 
 /**
+ * Handles a commit to the opponent's reject collection by checking whether it rejects the
+ * current version of my record. Each rejection is checked once; it is marked as seen only after
+ * the check succeeds, so a failed fetch of my record leads to a retry from enqueueEvent().
+ *
  * @param {Context} ctx
  * @param {{ uri: string, operation: string, cid: string, record: any }} event
  */
@@ -521,9 +610,14 @@ async function processRejectionEvent(ctx, { uri, operation, cid, record }) {
 }
 
 /**
+ * Emits onRejection if the rejection targets my record, is newer than my record, matches the
+ * reject lexicon, and names the CID of my record's current version. A rejection of an older
+ * version is stale (I already changed my record), so it is dropped.
+ *
  * @param {Context} ctx
- * @param {FetchedRecord} version
- * @param {() => Promise<string>} currentCid
+ * @param {FetchedRecord} version the rejection record
+ * @param {() => Promise<string>} currentCid returns my record's current CID; only called if the
+ *   cheaper checks pass, so my record is not fetched needlessly
  */
 async function reportRejectionIfCurrent(ctx, version, currentCid) {
   const { uri, cid, value } = version;
@@ -540,6 +634,10 @@ async function reportRejectionIfCurrent(ctx, version, currentCid) {
 }
 
 /**
+ * Emits onUpdate for a version of the opponent's game record, unless it has the same CID as the
+ * last version (a duplicate, e.g. the bootstrap and the stream both delivered it) or fails the
+ * game lexicon (reported once as InvalidRecord by isValid()).
+ *
  * @param {Context} ctx
  * @param {FetchedRecord} version
  */
@@ -556,8 +654,10 @@ function handleGameVersion(ctx, { uri, cid, value }) {
 /**
  * Finds the opponent's acceptance of our invitation: their game record whose challenge points at
  * our record and whose opponent is us. If there are several, the oldest (lowest TID) wins.
+ * listRecords returns newest first, so the last match in the loop is the oldest.
  *
  * @param {Context} ctx
+ * @returns {Promise<FetchedRecord | null>} null if the opponent has not accepted yet
  */
 async function findAcceptance(ctx) {
   /** @type {FetchedRecord | null} */
@@ -575,10 +675,15 @@ async function findAcceptance(ctx) {
 }
 
 /**
+ * Yields records in a collection whose record key is greater than `rkey`, newest first. Record
+ * keys are TIDs, which sort by creation time, so it stops paging at the first record that is not
+ * newer; anything older than my own record cannot belong to this game.
+ *
  * @param {Context} ctx
  * @param {string} did
  * @param {string} collection
  * @param {string} rkey
+ * @returns {AsyncGenerator<FetchedRecord>}
  */
 async function* listNewerThan(ctx, did, collection, rkey) {
   for await (const version of listRecords(ctx, did, collection)) {
@@ -590,6 +695,9 @@ async function* listNewerThan(ctx, did, collection, rkey) {
 }
 
 /**
+ * Checks a record against its collection's lexicon. An invalid record is reported as
+ * InvalidRecord once per URI and CID, so repeated deliveries do not repeat the error.
+ *
  * @param {Context} ctx
  * @param {string} collection
  * @param {FetchedRecord} version
@@ -617,8 +725,10 @@ function isValid(ctx, collection, { uri, cid, value }) {
 }
 
 /**
+ * Fetches one record from the PDS of the repo that owns it.
+ *
  * @param {Context} ctx
- * @param {string} uri
+ * @param {string} uri AT-URI of the record; must already be validated
  * @returns {Promise<FetchedRecord>}
  */
 async function getRecord(ctx, uri) {
@@ -628,6 +738,10 @@ async function getRecord(ctx, uri) {
 }
 
 /**
+ * Yields every record in a collection, newest first, fetching one page at a time so callers can
+ * stop early. Records whose URI is outside the requested repo or collection are skipped, since
+ * the PDS response is untrusted. Stops if the PDS repeats a cursor, so it cannot loop forever.
+ *
  * @param {Context} ctx
  * @param {string} did
  * @param {string} collection
@@ -655,6 +769,8 @@ async function* listRecords(ctx, did, collection) {
 }
 
 /**
+ * Whether a listed record's URI is in the given repo and collection.
+ *
  * @param {any} record
  * @param {string} did
  * @param {string} collection
@@ -664,16 +780,24 @@ function isRecordIn(record, did, collection) {
   return match !== null && match[1] === did && match[2] === collection;
 }
 
-/** @param {string} uri */
+/**
+ * Returns the record key, the last path segment of an AT-URI.
+ *
+ * @param {string} uri
+ */
 function rkeyOf(uri) {
   return uri.slice(uri.lastIndexOf('/') + 1);
 }
 
 /**
+ * Makes an XRPC read (GET) request to the PDS that hosts `did` and returns the JSON body. Error
+ * responses are thrown as ListenerErrors: 429 → RateLimited (with resetAt), 400 RecordNotFound →
+ * RecordNotFound (with the record's uri), anything else → HttpError.
+ *
  * @param {Context} ctx
- * @param {string} did
- * @param {string} method
- * @param {Record<string, string>} params
+ * @param {string} did DID whose PDS receives the request
+ * @param {string} method full XRPC method NSID, e.g. com.atproto.repo.listRecords
+ * @param {Record<string, string>} params sent as URL search params
  */
 async function xrpc(ctx, did, method, params) {
   const url = new URL(`/xrpc/${method}`, await pdsFor(ctx, did));
@@ -699,6 +823,9 @@ async function xrpc(ctx, did, method, params) {
 }
 
 /**
+ * Sends a GET request with ctx.fetch, which stop() can abort. A request that never gets a
+ * response (offline, DNS failure, aborted) is thrown as a NetworkError.
+ *
  * @param {Context} ctx
  * @param {URL} url
  */
@@ -710,13 +837,26 @@ async function send(ctx, url) {
   }
 }
 
-/** @param {Response} response */
+/**
+ * Reads the RateLimit-Reset header (seconds since the Unix epoch) and returns it in
+ * milliseconds, or undefined if it is missing or invalid.
+ *
+ * @param {Response} response
+ */
 function rateLimitReset(response) {
   const seconds = Number(response.headers.get('RateLimit-Reset'));
   return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
 }
 
-/** @param {Context} ctx @param {string} did */
+/**
+ * Returns the PDS URL for a DID, resolving it once and caching the result. The promise is
+ * cached, not the URL, so concurrent callers share one lookup. A failed lookup is removed from
+ * the cache so the next call tries again.
+ *
+ * @param {Context} ctx
+ * @param {string} did
+ * @returns {Promise<string>}
+ */
 function pdsFor(ctx, did) {
   if (!ctx.pdsByDid.has(did)) {
     const lookup = resolvePds(ctx, did);
@@ -727,8 +867,13 @@ function pdsFor(ctx, did) {
 }
 
 /**
+ * Finds a DID's PDS by fetching its DID document (from plc.directory for did:plc, or the
+ * domain's /.well-known/did.json for did:web) and reading the #atproto_pds service endpoint.
+ * Any failure is thrown as PdsResolutionFailed.
+ *
  * @param {Context} ctx
  * @param {string} did
+ * @returns {Promise<string>}
  */
 async function resolvePds(ctx, did) {
   /** @type {(reason: string, cause?: unknown) => ListenerError} */
@@ -764,7 +909,11 @@ async function resolvePds(ctx, did) {
   return service.serviceEndpoint;
 }
 
-/** @param {string} text */
+/**
+ * Whether `text` parses as an absolute URL.
+ *
+ * @param {string} text
+ */
 function isUrl(text) {
   try {
     return Boolean(new URL(text));
@@ -774,6 +923,9 @@ function isUrl(text) {
 }
 
 /**
+ * Passes ListenerErrors through unchanged and wraps anything else (a bug, a malformed response)
+ * as an UnexpectedError with the original as its cause, so onError always gets a `code`.
+ *
  * @param {unknown} error
  * @returns {ListenerError}
  */
@@ -787,6 +939,8 @@ function asListenerError(error) {
 }
 
 /**
+ * Creates an Error with a `code` and any extra fields (status, uri, …) that the UI can read.
+ *
  * @param {string} code
  * @param {string} message
  * @param {{ cause?: unknown } & Omit<Partial<ListenerError>, 'cause'>} [extra]
@@ -799,6 +953,10 @@ function listenerError(code, message, extra = {}) {
 }
 
 /**
+ * Calls one of the UI's callbacks. Does nothing after stop(), so late responses cannot reach
+ * a screen that is gone, and logs an exception thrown by the callback so a UI bug cannot break
+ * the listener.
+ *
  * @template T
  * @param {Context} ctx
  * @param {(value: T) => void} callback

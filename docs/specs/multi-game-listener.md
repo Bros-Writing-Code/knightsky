@@ -40,10 +40,10 @@ Jetstream v2 does not support changing filters on an open socket. Tested against
 To add a new opponent:
 
 1. Start a new subscription with the larger DID list, from the live tip. The old subscription keeps running.
-2. When the new one opens, abort the old one. Events from the overlap are deduplicated by CID, so nothing is missed in between.
+2. When the new one opens, keep the old one running for 5 more seconds, then abort it. The new subscription starts at the live tip, so events the server already sent the old socket may still be in flight; the grace period covers them. Events from the overlap are deduplicated by CID.
 3. Then read the new game from the PDS.
 
-If the opponent is already in the filter, there is nothing to do. Requests made in the same tick are batched, so discovering many games at startup opens one subscription.
+If the opponent is already in the filter, there is nothing to do. Requests made in the same tick, or while my repo is being listed, are batched, so discovering many games at startup opens one subscription however many pages the listing takes.
 
 The new subscription does not resume from the old one's cursor. `@atcute/jetstream` 2.2.1 compares a timestamp cursor (≥ 1e15) with event sequence numbers in its duplicate check, so it would drop every event. A seq cursor would work but is often unknown, because a quiet game sends no events.
 
@@ -63,7 +63,9 @@ Jetstream rejects an expired cursor before the WebSocket upgrade, and the client
 
 A reconnect with no cursor to resume from (no event yet) also re-reads every game.
 
-The first failure in a streak is reported as `NetworkError` with a `null` game ID.
+The first failure in a streak is reported as `NetworkError` with a `null` game ID, once across all subscriptions until one opens again.
+
+A failed PDS read is retried with exponential backoff (1 s up to 30 s). At most one retry waits per game, plus one for listing my repo, however many syncs fail.
 
 ### Discovery
 

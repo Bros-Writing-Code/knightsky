@@ -21,6 +21,10 @@ const MAX_BACKOFF_MS = 30000;
 // After this many failed connections in a row, the saved cursor may be past Jetstream's retention,
 // which looks exactly like a connection failure, so a fresh subscription replaces it.
 const FAILURES_BEFORE_FRESH_START = 5;
+// How long a replaced subscription keeps running after its successor opens. The new one starts at
+// the live tip, so events the server already sent the old socket are still in flight; this covers
+// them, and the overlap is deduplicated by CID.
+const OVERLAP_MS = 5000;
 
 // Records from other repos are untrusted, so every record is checked before it is reported.
 // JSON imports are typed loosely (`lexicon: number`, not `1`), hence the cast.
@@ -57,6 +61,7 @@ const lexicons = new Lexicons(
  *   syncing: boolean,
  *   resync: boolean,
  *   attempt: number,
+ *   retryScheduled: boolean,
  * }} Game
  * @typedef {{ all: boolean, games: Set<string> }} SyncPlan
  * @typedef {{
@@ -66,7 +71,6 @@ const lexicons = new Lexicons(
  *   opens: number,
  *   failures: number,
  *   sawEvent: boolean,
- *   errorReported: boolean,
  * }} Stream
  * @typedef {ReturnType<typeof createContext>} Context
  */
@@ -134,8 +138,16 @@ function createContext(options) {
     stream: /** @type {Stream | null} */ (null),
     /** @type {Stream | null} a subscription with a newer DID list that has not opened yet */
     pending: /** @type {Stream | null} */ (null),
+    /** @type {Set<Stream>} replaced subscriptions still running out their overlap */
+    retiring: new Set(),
     /** @type {SyncPlan | null} work waiting for the next subscription, batched for a tick */
     requested: /** @type {SyncPlan | null} */ (null),
+    /** Listings of my repo in progress; resubscribing waits for them, so pages batch together. */
+    listing: 0,
+    /** A NetworkError was reported and no subscription has opened since. */
+    networkErrorReported: false,
+    syncAllAttempt: 0,
+    syncAllRetryScheduled: false,
     /** Counts stream events, so a PDS read can tell whether the stream got there first. */
     clock: 0,
     /** @type {Set<string>} uri + cid of records already reported as invalid */
@@ -151,6 +163,7 @@ function stop(ctx) {
   ctx.controller.abort();
   ctx.stream?.controller.abort();
   ctx.pending?.controller.abort();
+  ctx.retiring.forEach((stream) => stream.controller.abort());
   ctx.timers.forEach(clearTimeout);
   ctx.timers.clear();
 }
@@ -161,7 +174,8 @@ function stop(ctx) {
 
 /**
  * Asks for a subscription covering my DID and every opponent, and for `plan` to run once it is
- * open. Requests within one tick are batched, so discovering many games opens one subscription.
+ * open. Requests within one tick, or during a listing of my repo, are batched, so discovering
+ * many games opens one subscription.
  *
  * @param {Context} ctx
  * @param {SyncPlan} plan
@@ -173,10 +187,19 @@ function requestStream(ctx, plan) {
   }
   ctx.requested = plan;
   later(ctx, 0, () => {
-    const requested = /** @type {SyncPlan} */ (ctx.requested);
+    if (ctx.listing === 0) {
+      flushRequested(ctx);
+    }
+  });
+}
+
+/** @param {Context} ctx */
+function flushRequested(ctx) {
+  const requested = ctx.requested;
+  if (requested) {
     ctx.requested = null;
     openStream(ctx, requested);
-  });
+  }
 }
 
 /**
@@ -205,7 +228,6 @@ function openStream(ctx, plan) {
     opens: 0,
     failures: 0,
     sawEvent: false,
-    errorReported: false,
   };
   ctx.pending = stream;
   void runStream(ctx, stream);
@@ -239,7 +261,7 @@ async function runStream(ctx, stream) {
   try {
     for await (const event of events) {
       stream.sawEvent = true;
-      if (stream === ctx.stream || stream === ctx.pending) {
+      if (!stream.controller.signal.aborted) {
         handleEvent(ctx, event);
       }
     }
@@ -251,8 +273,9 @@ async function runStream(ctx, stream) {
 }
 
 /**
- * The first open of a new subscription replaces the old one and runs its plan. A reconnect that
- * had no cursor to resume from (no event yet) may have missed commits, so everything is re-read.
+ * The first open of a new subscription replaces the old one, which keeps running for OVERLAP_MS,
+ * and runs its plan. A reconnect that had no cursor to resume from (no event yet) may have missed
+ * commits, so everything is re-read.
  *
  * @param {Context} ctx
  * @param {Stream} stream
@@ -263,9 +286,11 @@ function onStreamOpen(ctx, stream) {
   }
   stream.opens += 1;
   stream.failures = 0;
-  stream.errorReported = false;
+  ctx.networkErrorReported = false;
   if (stream === ctx.pending) {
-    ctx.stream?.controller.abort();
+    if (ctx.stream) {
+      retire(ctx, ctx.stream);
+    }
     ctx.stream = stream;
     ctx.pending = null;
     runPlan(ctx, stream.plan);
@@ -275,7 +300,21 @@ function onStreamOpen(ctx, stream) {
 }
 
 /**
- * Reports the first failure of a streak as a NetworkError. If the subscription had a cursor and
+ * Lets a replaced subscription run for OVERLAP_MS before closing it.
+ *
+ * @param {Context} ctx
+ * @param {Stream} stream
+ */
+function retire(ctx, stream) {
+  ctx.retiring.add(stream);
+  later(ctx, OVERLAP_MS, () => {
+    stream.controller.abort();
+    ctx.retiring.delete(stream);
+  });
+}
+
+/**
+ * Reports the first failure of a streak as a NetworkError, once across all subscriptions. If the subscription had a cursor and
  * keeps failing, the cursor may have expired, so a fresh subscription from the live tip replaces
  * it and everything is re-read from the PDS.
  *
@@ -287,8 +326,8 @@ function onStreamClose(ctx, stream) {
     return;
   }
   stream.failures += 1;
-  if (!stream.errorReported) {
-    stream.errorReported = true;
+  if (!ctx.networkErrorReported) {
+    ctx.networkErrorReported = true;
     report(ctx, null, codedError('NetworkError', 'Lost the connection to Jetstream'));
   }
   if (stream === ctx.stream && stream.sawEvent && stream.failures >= FAILURES_BEFORE_FRESH_START) {
@@ -499,6 +538,7 @@ function addNewGame(ctx, gameId, opponentDid, myRecord, readAt) {
     syncing: false,
     resync: false,
     attempt: 0,
+    retryScheduled: false,
   };
   ctx.games.set(gameId, game);
   ctx.gameIdByMyUri.set(myRecord.uri, gameId);
@@ -571,23 +611,30 @@ async function addGame(ctx, myRecordUri) {
 /**
  * Reads all of my game records, then the opponent side of every game whose opponent the current
  * subscription covers; games with new opponents are read once the new subscription opens. Runs
- * at startup and whenever commits may have been missed. A failure is retried with backoff.
+ * at startup and whenever commits may have been missed. A failure is retried with backoff, with
+ * at most one retry waiting however many syncs fail.
  *
  * @param {Context} ctx
- * @param {number} [attempt]
  */
-async function syncAll(ctx, attempt = 0) {
+async function syncAll(ctx) {
   const readAt = ctx.clock;
+  ctx.listing += 1;
   try {
     for await (const version of ctx.reader.listRecords(ctx.myDid, GAME)) {
       handleMyRecord(ctx, version, readAt);
     }
+    ctx.syncAllAttempt = 0;
   } catch (error) {
     if (!ctx.stopped) {
       report(ctx, null, error);
-      later(ctx, backoff(attempt), () => void syncAll(ctx, attempt + 1));
+      scheduleSyncAllRetry(ctx);
     }
     return;
+  } finally {
+    ctx.listing -= 1;
+    if (ctx.listing === 0) {
+      flushRequested(ctx);
+    }
   }
   for (const game of ctx.games.values()) {
     if (ctx.stream?.dids.has(game.opponentDid)) {
@@ -596,11 +643,23 @@ async function syncAll(ctx, attempt = 0) {
   }
 }
 
+/** @param {Context} ctx */
+function scheduleSyncAllRetry(ctx) {
+  if (ctx.syncAllRetryScheduled) {
+    return;
+  }
+  ctx.syncAllRetryScheduled = true;
+  later(ctx, backoff(ctx.syncAllAttempt++), () => {
+    ctx.syncAllRetryScheduled = false;
+    void syncAll(ctx);
+  });
+}
+
 /**
  * Reads the opponent's record (or looks for the acceptance of my invitation) and the rejections
  * they made, for state from before the subscription covered them. A request made while a read
- * is running runs again afterwards. Failures are reported and retried with backoff, except a
- * missing challenger record, which retrying cannot fix.
+ * is running runs again afterwards. Failures are reported and retried with backoff (one retry
+ * waiting per game), except a missing challenger record, which retrying cannot fix.
  *
  * @param {Context} ctx
  * @param {Game} game
@@ -625,8 +684,12 @@ async function syncOpponent(ctx, game) {
     }
     const coded = asCodedError(error);
     report(ctx, game.gameId, coded);
-    if (coded.code !== 'RecordNotFound') {
-      later(ctx, backoff(game.attempt++), () => void syncOpponent(ctx, game));
+    if (coded.code !== 'RecordNotFound' && !game.retryScheduled) {
+      game.retryScheduled = true;
+      later(ctx, backoff(game.attempt++), () => {
+        game.retryScheduled = false;
+        void syncOpponent(ctx, game);
+      });
     }
   } finally {
     game.syncing = false;

@@ -53,46 +53,48 @@ function json(body, status = 200) {
   });
 }
 
+/** Answers one request from the PLC directory or from the repos in `collection`. */
+function respond(url, collection) {
+  if (url.origin === 'https://plc.directory') {
+    const did = decodeURIComponent(url.pathname.slice(1));
+    return PDS[did]
+      ? json({
+          id: did,
+          service: [
+            { id: '#atproto_pds', type: 'AtprotoPersonalDataServer', serviceEndpoint: PDS[did] },
+          ],
+        })
+      : json({ message: 'DID not registered' }, 404);
+  }
+  const params = Object.fromEntries(url.searchParams);
+  const did = Object.keys(PDS).find((candidate) => PDS[candidate] === url.origin);
+  if (did !== params.repo) {
+    return json({ error: 'RepoNotFound' }, 400);
+  }
+  const records = collection(params.repo, params.collection);
+  if (url.pathname === '/xrpc/com.atproto.repo.getRecord') {
+    const record = records.get(params.rkey);
+    return record ? json(record) : json({ error: 'RecordNotFound' }, 400);
+  }
+  const newestFirst = [...records.keys()].sort().reverse();
+  const start = params.cursor ? newestFirst.indexOf(params.cursor) + 1 : 0;
+  const page = newestFirst.slice(start, start + Number(params.limit));
+  return json({
+    records: page.map((rkey) => records.get(rkey)),
+    ...(page.length ? { cursor: page.at(-1) } : {}),
+  });
+}
+
 /** A fake fetch serving plc.directory DID documents and the repos of the DIDs in PDS. */
 export function fakeNetwork() {
   const repos = {};
   const requests = [];
   let failNext;
+  let failing;
   const collection = (did, nsid) => ((repos[did] ??= {})[nsid] ??= new Map());
 
   function put(did, nsid, rkey, cid, value) {
     collection(did, nsid).set(rkey, { uri: uri(did, nsid, rkey), cid, value });
-  }
-
-  function respond(url) {
-    if (url.origin === 'https://plc.directory') {
-      const did = decodeURIComponent(url.pathname.slice(1));
-      return PDS[did]
-        ? json({
-            id: did,
-            service: [
-              { id: '#atproto_pds', type: 'AtprotoPersonalDataServer', serviceEndpoint: PDS[did] },
-            ],
-          })
-        : json({ message: 'DID not registered' }, 404);
-    }
-    const params = Object.fromEntries(url.searchParams);
-    const did = Object.keys(PDS).find((candidate) => PDS[candidate] === url.origin);
-    if (did !== params.repo) {
-      return json({ error: 'RepoNotFound' }, 400);
-    }
-    const records = collection(params.repo, params.collection);
-    if (url.pathname === '/xrpc/com.atproto.repo.getRecord') {
-      const record = records.get(params.rkey);
-      return record ? json(record) : json({ error: 'RecordNotFound' }, 400);
-    }
-    const newestFirst = [...records.keys()].sort().reverse();
-    const start = params.cursor ? newestFirst.indexOf(params.cursor) + 1 : 0;
-    const page = newestFirst.slice(start, start + Number(params.limit));
-    return json({
-      records: page.map((rkey) => records.get(rkey)),
-      ...(page.length ? { cursor: page.at(-1) } : {}),
-    });
   }
 
   const fetch = vi.fn(async (input, init = {}) => {
@@ -101,12 +103,15 @@ export function fakeNetwork() {
     if (init.signal?.aborted) {
       throw new DOMException('Aborted', 'AbortError');
     }
+    if (failing && failing.match(url)) {
+      return failing.respond(url);
+    }
     if (failNext && failNext.match(url)) {
       const { respond: fail } = failNext;
       failNext = undefined;
       return fail(url);
     }
-    return respond(url);
+    return respond(url, collection);
   });
 
   return {
@@ -115,6 +120,8 @@ export function fakeNetwork() {
     requests,
     /** Makes the next request matching `match` return or throw what `respond` does. */
     failOnce: (respond, match = () => true) => (failNext = { respond, match }),
+    /** Makes every request matching `match` return or throw what `respond` does. */
+    failAlways: (respond, match = () => true) => (failing = { respond, match }),
     calls: (method) =>
       requests.filter((url) => url.pathname === `/xrpc/com.atproto.repo.${method}`),
   };

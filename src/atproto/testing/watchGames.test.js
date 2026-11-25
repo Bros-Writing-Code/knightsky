@@ -8,6 +8,7 @@ import {
   CID,
   FakeWebSocket,
   GAME,
+  PDS,
   REJECT,
   fakeNetwork,
   game,
@@ -70,6 +71,17 @@ async function openSockets() {
   }
 }
 
+/** Waits for the client's next reconnect attempt and lets it succeed. */
+async function reconnect() {
+  const connecting = () =>
+    FakeWebSocket.instances.some((socket) => socket.readyState === FakeWebSocket.CONNECTING);
+  // Step in 1 s increments so the socket is opened before partysocket's 4 s connect timeout.
+  for (let i = 0; i < 60 && !connecting(); i += 1) {
+    await vi.advanceTimersByTimeAsync(1000);
+  }
+  await openSockets();
+}
+
 async function start(options = {}) {
   watcher = watchGames({
     myDid: ALICE,
@@ -83,6 +95,14 @@ async function start(options = {}) {
   await openSockets();
   return watcher;
 }
+
+const bobMoved = () =>
+  game({
+    opponent: ALICE,
+    color: 'black',
+    challenge: { uri: ALICE_INVITE, cid: CID[0] },
+    fen: AFTER_E4,
+  });
 
 const changes = (type) => onChange.mock.calls.filter(([, change]) => change.type === type);
 
@@ -149,7 +169,9 @@ describe('startup', () => {
     expect(second.url.searchParams.getAll('collections')).toEqual([GAME, REJECT]);
     expect(second.url.searchParams.get('kinds')).toBe('commit');
     expect(second.protocols).toBe('xrpc.v1.json');
-    // The old stream closes only after the new one has opened.
+    // The old stream closes only after the new one has opened, plus a grace period.
+    expect(first.readyState).toBe(FakeWebSocket.OPEN);
+    await vi.advanceTimersByTimeAsync(5000);
     expect(first.readyState).toBe(FakeWebSocket.CLOSED);
     expect(liveSocket()).toBe(second);
   });
@@ -350,6 +372,77 @@ describe('adding games', () => {
   });
 });
 
+describe('swapping subscriptions', () => {
+  it('keeps handling events from the old subscription during the grace period', async () => {
+    await start();
+    const old = liveSocket();
+    addCarolGame();
+    watcher.add(ALICE_ACCEPT);
+    await openSockets();
+    expect(liveSocket()).not.toBe(old);
+    onChange.mockClear();
+
+    // A move the server sent the old socket just before the swap.
+    old.commit({
+      did: BOB,
+      collection: GAME,
+      rkey: rkey(BOB_ACCEPT),
+      cid: CID[5],
+      record: bobMoved(),
+    });
+    await flush();
+    expect(changes('opponentUpdated')).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(old.readyState).toBe(FakeWebSocket.CLOSED);
+  });
+
+  it('opens one subscription for a discovery that spans several pages', async () => {
+    // 50 newer games against Bob fill the first page; the game against Carol is on the second.
+    for (let i = 0; i < 50; i += 1) {
+      network.put(
+        ALICE,
+        GAME,
+        `3m4${String(i).padStart(10, 'a')}`,
+        CID[4],
+        game({ opponent: BOB }),
+      );
+    }
+    network.put(ALICE, GAME, '3m21aaaaaaa22', CID[4], game({ opponent: CAROL }));
+    const original = network.fetch.getMockImplementation();
+    network.fetch.mockImplementation(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.searchParams.get('repo') === ALICE && url.searchParams.has('cursor')) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return original(input, init);
+    });
+    await start();
+    // Both delayed pages and the empty one that ends the listing.
+    await vi.advanceTimersByTimeAsync(100);
+    await openSockets();
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(new Set(liveSocket().dids)).toEqual(new Set([ALICE, BOB, CAROL]));
+  });
+
+  it('reports one NetworkError when both the old and the new subscription fail', async () => {
+    await start();
+    const current = liveSocket();
+    addCarolGame();
+    watcher.add(ALICE_ACCEPT);
+    await flush();
+    const pending = FakeWebSocket.instances.at(-1);
+    expect(pending.readyState).toBe(FakeWebSocket.CONNECTING);
+
+    current.fail();
+    pending.fail();
+    await flush();
+    const networkErrors = onError.mock.calls.filter(([, error]) => error.code === 'NetworkError');
+    expect(networkErrors).toHaveLength(1);
+  });
+});
+
 describe('rejections', () => {
   const rejectCommit = (subjectCid, rk = '3m2ffffffff22') => ({
     did: BOB,
@@ -498,6 +591,25 @@ describe('failures', () => {
     await vi.advanceTimersByTimeAsync(1000);
     await flush();
     expect(watcher.list()[0].opponentRecord).toMatchObject({ cid: CID[1] });
+  });
+
+  it('keeps one retry chain per game however many syncs fail', async () => {
+    network.failAlways(
+      () => new Response('{}', { status: 500 }),
+      (url) => url.origin === PDS[BOB],
+    );
+    await start();
+    // Each reconnect without a cursor re-reads every game, and each read fails again.
+    for (let i = 0; i < 3; i += 1) {
+      liveSocket().fail();
+      await reconnect();
+    }
+    // Let the backoff reach its 30 s cap, then count attempts over two minutes.
+    await vi.advanceTimersByTimeAsync(300000);
+    const before = network.requests.length;
+    await vi.advanceTimersByTimeAsync(120000);
+    const bobAttempts = network.requests.slice(before).filter((url) => url.origin === PDS[BOB]);
+    expect(bobAttempts.length).toBeLessThanOrEqual(5);
   });
 
   it('stop() closes the socket and silences callbacks', async () => {

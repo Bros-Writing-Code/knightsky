@@ -26,7 +26,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "bugs": {
     "url": "https://github.com/Bros-Writing-Code/chess-using-at-protocol/issues"

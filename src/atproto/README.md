@@ -103,7 +103,7 @@ What follows is a description of the communication flow between clients.
 7. Alice's client listens for `game` records from Bob's DID whose `challenge` points at her record.
 8. Alice makes a move on the UI.
 9. The client updates her `game` record by appending the move on the PGN notation and rewriting the FEN.
-10. Bob's client detects the update with his polling loop.
+10. Bob's client detects the update from the Jetstream WebSocket.
 11. If Alice updated her status to `ended`, the game is over. Bob's client checks her `termination` and `result`, then marks his own record `ended`.
 12. Bob's client compares the PGN to his PGN.
     1. It checks whether it was Alice's turn. (fail -> wrongTurn)
@@ -115,7 +115,7 @@ What follows is a description of the communication flow between clients.
     2. It checks whether the status of the game is still accurate, especially looking for premature termination conditions (fail -> noDrawOffer or something similar)
 14. Bob makes a move on the UI.
 
-If Alice's polling loop notices that Bob rejected her move while she's waiting for him to take his turn, she would ideally rectify the mistake by making another update to her game record.
+If Alice's listener notices that Bob rejected her move while she's waiting for him to take his turn, she would ideally rectify the mistake by making another update to her game record.
 
 - If her most recent move is an illegal move, she could just choose a different move
 - If she miscomputed the FEN, she could try computing it again
@@ -126,7 +126,7 @@ If Alice fixes her error and writes the fix to her repo, then Bob would take his
 
 ### Opponent Listener
 
-Here's a basic explanation of how each client listens for changes to their opponents' repo. The UI calls `watchOpponentGame()`, which returns a `stop()` function. In the function call, the UI has to include a set of options, along with three callbacks: `onUpdate`, `onRejection`, and `onError`. For the options, if the client has accepted a challenge for this game, they should include `opponentRecordUri`. If they sent a challenge, send `opponentDid`. The opponent listener finds the acceptance record first for challeneger clients. The `onError` callback should handle   `PdsResolutionFailed`, `NetworkError`, `RateLimited`, `HttpError`, `RecordNotFound`, `InvalidRecord`, and `UnexpectedError`. The opponent listener polls the opponent's PDS once per second, backing off for 30s on errors, and waits at most 5 minutes after a rate limit error (429). It does not do any validation of the chess moves themselves. A separate validation function handles that.
+Here's a basic explanation of how each client listens for changes to their opponents' repo. The UI calls `watchOpponentGame()`, which returns a `stop()` function. In the function call, the UI has to include a set of options, along with three callbacks: `onUpdate`, `onRejection`, and `onError`. For the options, if the client has accepted a challenge for this game, they should include `opponentRecordUri`. If they sent a challenge, send `opponentDid`. The opponent listener finds the acceptance record first for challenger clients. It reads the current game and rejections from the opponent's PDS once at startup, then subscribes to their `app.knightsky.game` and `app.knightsky.reject` commits over Jetstream v2. The default endpoint is `wss://jetstream.us-west.bsky.network/xrpc/network.bsky.jetstream.subscribeEvents`; callers can override it with `jetstreamUrl`. On a dropped connection it reconnects with exponential backoff capped at 30 seconds, resuming from the last Jetstream cursor. The `onError` callback should handle `PdsResolutionFailed`, `NetworkError`, `RateLimited`, `HttpError`, `RecordNotFound`, `InvalidRecord`, and `UnexpectedError`. The listener does not validate chess moves; a separate validation function handles that.
 
 ## Auth Tests
 

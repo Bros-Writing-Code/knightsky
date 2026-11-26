@@ -415,47 +415,65 @@ export function appendMove(pgn, uci) {
 }
 
 /**
+ * Why nextMove rejected an update. `error` stays a readable message; `code` is
+ * stable, so callers can branch on it:
+ * - INVALID_PREVIOUS: the previous PGN doesn't parse (a bug on our side).
+ * - GAME_OVER: the previous game already ended (checkmate, stalemate, a draw,
+ *   or a final result 1-0 / 0-1 / 1/2-1/2), even if the update drops the result.
+ * - INVALID_PGN: the new PGN doesn't parse or contains an illegal move.
+ * - CHANGED_MOVE: an earlier move was rewritten or removed.
+ * - NO_NEW_MOVE: same moves as before (e.g. only tags or comments changed).
+ * - TOO_MANY_MOVES: more than one move was added.
+ *
+ * @typedef {'INVALID_PREVIOUS' | 'GAME_OVER' | 'INVALID_PGN' | 'CHANGED_MOVE' | 'NO_NEW_MOVE' | 'TOO_MANY_MOVES'} NextMoveCode
+ */
+
+/**
  * Checks that an updated PGN is the previous one plus exactly one legal move,
  * and returns that move. Use it whenever an opponent's game record changes:
  * it rejects rewritten or removed earlier moves, updates with no new move,
- * several moves at once, and any move after the previous PGN's final result
- * (1-0, 0-1, 1/2-1/2), even if the update drops that result. Moves are compared, not text, so tags, comments and
- * spacing don't matter.
+ * several moves at once, and any move after the game ended. Moves are
+ * compared, not text, so tags, comments and spacing don't matter.
  *
  * @param {string} oldPgn - The game as last accepted ("" before the first move).
  * @param {string} newPgn - The updated record.
- * @returns {Result<{ uci: string, san: string, color: 'w' | 'b', state: GameState }>}
+ * @returns {{ ok: true, value: { uci: string, san: string, color: 'w' | 'b', state: GameState } }
+ *   | { ok: false, error: string, code: NextMoveCode }}
  *   `color` is the side that made the move, so callers can check it was that
- *   player's turn; `state` is the position after it.
+ *   player's turn; `state` is the position after it. On failure, `code` says
+ *   why (see NextMoveCode) and `error` is a message for logs or display.
  * @example nextMove('1. e4', '1. e4 e5') // { ok: true, value: { uci: 'e7e5', san: 'e5', color: 'b', state } }
+ * @example nextMove('1. e4', '1. d4') // { ok: false, error: 'Move 1 was changed or removed', code: 'CHANGED_MOVE' }
  */
 export function nextMove(oldPgn, newPgn) {
   const before = parsePGN(oldPgn);
   if (!before.ok) {
-    return { ok: false, error: `Previous PGN: ${before.error}` };
+    return { ok: false, error: `Previous PGN: ${before.error}`, code: 'INVALID_PREVIOUS' };
   }
   const finished = checkNotFinished(before.value.result);
   if (!finished.ok) {
-    return finished;
+    return { ...finished, code: 'GAME_OVER' };
+  }
+  if (before.value.state.status !== 'active') {
+    return { ok: false, error: 'The game is already over', code: 'GAME_OVER' };
   }
   const after = parsePGN(newPgn);
   if (!after.ok) {
-    return after;
+    return { ...after, code: 'INVALID_PGN' };
   }
 
   const previous = before.value.sans;
   const updated = after.value.sans;
   const changed = previous.findIndex((san, i) => updated[i] !== san);
   if (changed !== -1) {
-    return { ok: false, error: `Move ${changed + 1} was changed or removed` };
+    return { ok: false, error: `Move ${changed + 1} was changed or removed`, code: 'CHANGED_MOVE' };
   }
 
   const added = updated.length - previous.length;
   if (added !== 1) {
-    return {
-      ok: false,
-      error: added === 0 ? 'No new move' : `Expected one new move, found ${added}`,
-    };
+    return added === 0
+      ? { ok: false, error: 'No new move', code: 'NO_NEW_MOVE' }
+      : { ok: false, error: `Expected one new move, found ${added}`, code: 'TOO_MANY_MOVES' };
   }
 
   return {

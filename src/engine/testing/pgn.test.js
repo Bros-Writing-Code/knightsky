@@ -270,38 +270,72 @@ describe('nextMove', () => {
     expect(nextMove('1. e4 e5', '1. d4 e5 2. Nf3')).toEqual({
       ok: false,
       error: 'Move 1 was changed or removed',
+      code: 'CHANGED_MOVE',
     });
     expect(nextMove('1. e4 e5 2. Nf3', '1. e4 e5')).toEqual({
       ok: false,
       error: 'Move 3 was changed or removed',
+      code: 'CHANGED_MOVE',
     });
   });
 
   it('rejects no new move, or more than one', () => {
-    expect(nextMove('1. e4', '1. e4')).toEqual({ ok: false, error: 'No new move' });
+    expect(nextMove('1. e4', '1. e4')).toEqual({
+      ok: false,
+      error: 'No new move',
+      code: 'NO_NEW_MOVE',
+    });
     expect(nextMove('1. e4', '1. e4 e5 2. Nf3')).toEqual({
       ok: false,
       error: 'Expected one new move, found 2',
+      code: 'TOO_MANY_MOVES',
     });
   });
 
   it('rejects an illegal new move, a move after the game ended, or a bad previous PGN', () => {
-    expect(nextMove('1. e4', '1. e4 e4')).toMatchObject({ ok: false, error: /Move 2 \(e4\)/ });
+    expect(nextMove('1. e4', '1. e4 e4')).toMatchObject({
+      ok: false,
+      error: /Move 2 \(e4\)/,
+      code: 'INVALID_PGN',
+    });
     expect(nextMove('1. f3 e5 2. g4 Qh4#', '1. f3 e5 2. g4 Qh4# 3. a3')).toMatchObject({
       ok: false,
       error: /already over/,
+      code: 'GAME_OVER',
     });
-    expect(nextMove('1. e5', '1. e5 e5')).toMatchObject({ ok: false, error: /^Previous PGN: / });
+    expect(nextMove('1. e5', '1. e5 e5')).toMatchObject({
+      ok: false,
+      error: /^Previous PGN: /,
+      code: 'INVALID_PREVIOUS',
+    });
   });
 
   it('rejects any move after a final result, even if the update drops the result', () => {
-    const over = { ok: false, error: 'The game is already over (1-0)' };
+    const over = { ok: false, error: 'The game is already over (1-0)', code: 'GAME_OVER' };
     expect(nextMove('1. e4 1-0', '1. e4 e5')).toEqual(over);
     expect(nextMove('1. e4 1-0', '1. e4 e5 1-0')).toEqual(over);
     expect(nextMove('1. e4 e5 1/2-1/2', '1. e4 e5 2. Nf3')).toMatchObject({
       ok: false,
       error: /already over \(1\/2-1\/2\)/,
+      code: 'GAME_OVER',
     });
+  });
+
+  it('gives every error a code, so callers can branch on it', () => {
+    const cases = [
+      ['1. e5', '1. e4', 'INVALID_PREVIOUS'],
+      ['1. f3 e5 2. g4 Qh4#', '1. f3 e5 2. g4 Qh4# 3. a3', 'GAME_OVER'],
+      ['1. e4 0-1', '1. e4 e5', 'GAME_OVER'],
+      ['1. e4', '1. e4 (1... c5)', 'INVALID_PGN'],
+      ['1. e4', '1. d4 d5', 'CHANGED_MOVE'],
+      ['1. e4', '[Event "x"] 1. e4', 'NO_NEW_MOVE'],
+      ['', '1. e4 e5', 'TOO_MANY_MOVES'],
+    ];
+    for (const [oldPgn, newPgn, code] of cases) {
+      const result = nextMove(oldPgn, newPgn);
+      expect(result, `${oldPgn} -> ${newPgn}`).toMatchObject({ ok: false, code });
+      expect(typeof (/** @type {any} */ (result).error)).toBe('string');
+    }
   });
 
   it('still accepts a move after "*" (game in progress)', () => {

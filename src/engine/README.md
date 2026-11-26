@@ -71,7 +71,7 @@ const { status, winner } = getGameStatus(state);           // 'active' | 'checkm
 | `fromSAN(state, san)` | `Result<string>` with the UCI move; accepts `+`/`#`/`!?`, `0-0`, and `e8Q` without `=` |
 | `replayPGN(pgn)` | `Result<GameState>` from the standard start; `''` is a game with no moves; the error names the failing move |
 | `appendMove(pgn, uci)` | `Result<{ pgn, state }>`: checks the whole PGN, adds the move, returns canonical PGN and the new state |
-| `nextMove(oldPgn, newPgn)` | `Result<{ uci, san, color, state }>`: checks the new PGN is the old one plus exactly one legal move; rejects changed or removed moves, no new move, or several |
+| `nextMove(oldPgn, newPgn)` | `Result<{ uci, san, color, state }>`: checks the new PGN is the old one plus exactly one legal move. Errors also carry a `code`: `INVALID_PREVIOUS`, `GAME_OVER`, `INVALID_PGN`, `CHANGED_MOVE`, `NO_NEW_MOVE` or `TOO_MANY_MOVES` |
 | `printBoard(state.board)` | ASCII board (debug only) |
 
 **Promotion:** a pawn moving to the last rank (row 0 for White, row 7 for Black) needs a promotion piece. Append `q`, `r`, `b`, or `n` to the UCI, e.g. `e7e8q`.
@@ -85,8 +85,11 @@ if (!result.ok) reject(result.error);                  // e.g. 'Move 12 (Nxe9): 
 
 // When an opponent's record changes, accept exactly one new move, made by them:
 const update = nextMove(lastAcceptedPgn, record.pgn);
-if (!update.ok) reject(update.error);                  // e.g. 'Move 3 was changed or removed'
-else if (update.color !== opponentColor) reject('Not their move');
+if (update.ok) {
+  if (update.value.color !== opponentColor) reject('Not their move');
+} else if (update.code !== 'NO_NEW_MOVE') {            // NO_NEW_MOVE: e.g. only tags changed, ignore
+  reject(update.error);                                // e.g. CHANGED_MOVE: 'Move 3 was changed or removed'
+}
 ```
 
 Always check updates with `nextMove`, not just `replayPGN`: game records can be edited, so a valid PGN could still have rewritten an earlier move.

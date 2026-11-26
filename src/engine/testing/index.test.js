@@ -13,6 +13,8 @@ import {
   isInCheck,
   getGameStatus,
   GameStatetoFEN,
+  toSAN,
+  fromSAN,
 } from '../index.js';
 
 /** Apply moves that must all be legal; fails the test otherwise. */
@@ -57,6 +59,10 @@ describe('public API surface', () => {
       'GameStatetoFEN',
       'moveToUCI',
       'UCItoMove',
+      'toSAN',
+      'fromSAN',
+      'replayPGN',
+      'appendMove',
       'printBoard',
     ];
     for (const name of expected) {
@@ -90,6 +96,8 @@ describe('public API surface', () => {
       getGameStatus(state);
       toGrid(state);
       GameStatetoFEN(state);
+      toSAN(state, 'g1f3');
+      fromSAN(state, 'Nf3');
     }).not.toThrow();
   });
 });

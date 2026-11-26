@@ -31,7 +31,8 @@
 - `Session`: The signed-in state the atproto oauth library keeps in IndexedDB
 - `AppView`: Bluesky's public index of its social network, used to look up display names after sign in.
 - `OAuth`: open standard for access delegation on the web. Used with familiar log in features like the "Sign in with Google" button. Common authentication system for applications that want to allow users to sign in with their atproto identity.
-- `Sign In`: 
+- `Sign In/Sign Out`: Normal definition. Used in these docs as opposed to login or log in.
+- `Jetstream`: Service run by Bluesky that streams changes to AT protocol repos as plain JSON over a WebSocket.
 
 ## Lexicon Terms
 

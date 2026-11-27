@@ -13,7 +13,8 @@
 - [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`)
 - [ ] Tests added or updated for the new behaviour
 - [ ] ADR added in `docs/adr/` if this adds new functionality or changes the code structure (use `docs/adr/0000-template.md`)
-- [ ] Version bumped in `package.json` and `index.html` if this adds a feature (see below)
+- [ ] Docstring comments written for new exported functions
+- [ ] Version bumped in `package.json` if this adds a feature (see below). The `index.html` footer follows it automatically.
 - [ ] Docs updated if behaviour changed
 
 <!--

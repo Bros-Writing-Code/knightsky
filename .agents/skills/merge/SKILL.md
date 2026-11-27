@@ -82,7 +82,7 @@ ours/theirs, edit conflict markers, or continue the conflicted operation yoursel
 - Review the selected diff and run `git diff --check`. Stage only the agreed paths
   or hunks, inspect the staged diff, and create any necessary commits using
   `GIT_EDITOR=true git commit -m "<descriptive message>"`. Use accurate, concise
-  commit messages; no mandatory Conventional Commits format was established.
+  Conventional Commits messages (`feat:`, `fix:`, `docs:`, `chore:`), as the PR template requires.
   Preserve configured signing and hooks rather than bypassing them. Reference
   real issues only when relevant, and use closing keywords only when intended.
 - Fetch `origin` and compare the branch with the latest `origin/main`. Before
@@ -105,12 +105,13 @@ Repository commands and their sources:
 | When | Command | Repository-relative source establishing the invocation |
 | --- | --- | --- |
 | Dependencies are absent or do not match the selected lockfile | `npm ci` | `package.json` and `package-lock.json`: npm manifest and committed dependency lock; install from the lock without updating it. |
+| Code, tests, schemas, dependencies, or executable configuration change | `npm run lint`, `npm run format:check` | `package.json`, `scripts.lint` and `scripts.format:check`; CI runs both as required checks. |
 | Code, tests, schemas, dependencies, or executable configuration change | `npm test` | `package.json`, `scripts.test`: `vitest run`; tests live under `src/engine/testing/`, `src/app/chessground-demo/testing/`, and `src/atproto/testing/` when present. |
-| Demo code, assets, relevant dependencies, or build behavior change | `npm run build` | `package.json`, `scripts.build`: `vite build src/app/chessground-demo`. |
-| A demo change requires browser verification | `npm run dev` | `package.json`, `scripts.dev`: `vite src/app/chessground-demo`; `docs/specs/chessground-demo.md`, Testing / Browser checklist. |
+| Demo code, assets, relevant dependencies, or build behavior change | `npm run build` | `package.json`, `scripts.build`: `vite build`; the app folder is set in `vite.config.js`. |
+| A demo change requires browser verification | `npm run dev` | `package.json`, `scripts.dev`: `vite`; the app folder is set in `vite.config.js`; `docs/specs/chessground-demo.md`, Testing / Browser checklist. |
 
-- Run the full non-watch `npm test` for the applicable changes above. The project
-  has no verified lint or typecheck script; do not invent one. Keep local checks
+- Run the full non-watch `npm test`, plus `npm run lint` and `npm run format:check`,
+  for the applicable changes above. The project has no typecheck script; do not invent one. Keep local checks
   proportional: documentation-only changes do not require runtime tests or a
   build unless they alter executable behavior or current policy says otherwise.
   Inspect their diff, links, and any applicable submission requirements instead.
@@ -177,9 +178,8 @@ Repository commands and their sources:
   Pending, failing, cancelled, missing, or unverifiable required checks block
   merging. Treat skipped/neutral results as satisfying a requirement only when
   the destination's rules explicitly accept them.
-- At setup there were no GitHub Actions workflows and no effective rules for
-  `main`. Do not assume this remains true, nor assume the ADR's mention of CI
-  means CI exists. If current rules and repository configuration verifiably have
+- `.github/workflows/ci.yaml` runs `lint`, `format`, `test` and `build` on every PR. Check
+  the actual required checks in the current rules rather than assuming. If current rules and repository configuration verifiably have
   no required remote checks, record that fact and use the applicable successful
   local checks plus mandatory independent review. Local checks never replace a
   remote check that is required but unavailable.

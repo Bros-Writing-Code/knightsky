@@ -25,7 +25,7 @@ export { isInCheck, getGameStatus } from './gameState.js';
 export { GameStatetoFEN, moveToUCI, UCItoMove } from './notation.js';
 
 // PGN, the move history format of AT game records (moves inside the engine stay UCI)
-export { toSAN, fromSAN, replayPGN, appendMove } from './pgn.js';
+export { toSAN, fromSAN, replayPGN, appendMove, nextMove } from './pgn.js';
 
 // Debugging only: printBoard(state.board) prints an ASCII board
 export { printBoard } from './0x88helper.js';

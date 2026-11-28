@@ -63,6 +63,7 @@ describe('public API surface', () => {
       'fromSAN',
       'replayPGN',
       'appendMove',
+      'nextMove',
       'printBoard',
     ];
     for (const name of expected) {

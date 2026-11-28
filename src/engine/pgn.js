@@ -23,6 +23,8 @@ import { moveGenerator } from './moveGeneration.js';
  */
 
 const RESULT_TOKENS = new Set(['1-0', '0-1', '1/2-1/2', '*']);
+/** Results that end the game; "*" means it is still going. */
+const FINAL_RESULTS = new Set(['1-0', '0-1', '1/2-1/2']);
 
 /* ─────────────────────────── UCI → SAN ─────────────────────────── */
 
@@ -276,10 +278,10 @@ function moveText(pgn) {
 /**
  * Splits PGN text into move tokens. Skips tag pairs, comments, NAGs ($1) and
  * move numbers ("1.", "1...", including "1.e4"). A result token (1-0, 0-1,
- * 1/2-1/2, *) may only come last.
+ * 1/2-1/2, *) may only come last, and is returned separately.
  *
  * @param {string} pgn
- * @returns {Result<string[]>}
+ * @returns {Result<{ moves: string[], result: string | null }>}
  */
 function tokenizePGN(pgn) {
   const text = moveText(pgn);
@@ -299,15 +301,18 @@ function tokenizePGN(pgn) {
   if (resultAt !== -1 && resultAt !== tokens.length - 1) {
     return { ok: false, error: `Moves found after the result ${tokens[resultAt]}` };
   }
-  return { ok: true, value: resultAt === -1 ? tokens : tokens.slice(0, -1) };
+  return resultAt === -1
+    ? { ok: true, value: { moves: tokens, result: null } }
+    : { ok: true, value: { moves: tokens.slice(0, -1), result: tokens[resultAt] } };
 }
 
 /**
  * Replays PGN text from the standard starting position.
- * Returns the final state and every move as SAN, in canonical form.
+ * Returns the final state, every move as SAN in canonical form, and the
+ * result token if there is one ("1-0", "0-1", "1/2-1/2", "*" or null).
  *
  * @param {unknown} pgn
- * @returns {Result<{ state: GameState, sans: string[] }>}
+ * @returns {Result<{ state: GameState, sans: string[], ucis: string[], result: string | null }>}
  */
 function parsePGN(pgn) {
   if (typeof pgn !== 'string') {
@@ -320,8 +325,10 @@ function parsePGN(pgn) {
 
   let state = createGame();
   const sans = [];
-  for (let i = 0; i < tokens.value.length; i++) {
-    const token = tokens.value[i];
+  const ucis = [];
+  const { moves, result: gameResult } = tokens.value;
+  for (let i = 0; i < moves.length; i++) {
+    const token = moves[i];
     const match = matchSAN(state, token);
     const result = match.ok ? applyMove(state, match.value.uci) : match;
     if (!result.ok) {
@@ -329,9 +336,24 @@ function parsePGN(pgn) {
     }
     // Canonical SAN, whatever the input style: the matched body plus our own check mark.
     sans.push(match.value.body + checkMark(result.value));
+    ucis.push(match.value.uci);
     state = result.value;
   }
-  return { ok: true, value: { state, sans } };
+  return { ok: true, value: { state, sans, ucis, result: gameResult } };
+}
+
+/**
+ * An error if the PGN ends with a final result (1-0, 0-1, 1/2-1/2), e.g. after
+ * a resignation or an agreed draw, since no move may follow it. Checkmate and
+ * stalemate are already caught by applyMove.
+ *
+ * @param {string | null} result
+ * @returns {Result<null>}
+ */
+function checkNotFinished(result) {
+  return result !== null && FINAL_RESULTS.has(result)
+    ? { ok: false, error: `The game is already over (${result})` }
+    : { ok: true, value: null };
 }
 
 /**
@@ -364,6 +386,7 @@ export function replayPGN(pgn) {
  * Adds one move to a PGN game and returns the new PGN text with the new
  * position. The whole PGN is checked first, and the output is always in
  * canonical form ("1. e4 e5 2. Nf3"), so comments and tags are dropped.
+ * A PGN that ends with a final result (1-0, 0-1, 1/2-1/2) takes no more moves.
  *
  * @param {string} pgn - The game so far ("" before the first move).
  * @param {string} uci - The move to add, e.g. "g1f3".
@@ -376,6 +399,11 @@ export function appendMove(pgn, uci) {
     return parsed;
   }
 
+  const finished = checkNotFinished(parsed.value.result);
+  if (!finished.ok) {
+    return finished;
+  }
+
   const { state, sans } = parsed.value;
   const result = applyMove(state, uci);
   if (!result.ok) {
@@ -384,4 +412,77 @@ export function appendMove(pgn, uci) {
 
   const nextPGN = formatPGN([...sans, toSAN(state, uci)]);
   return { ok: true, value: { pgn: nextPGN, state: result.value } };
+}
+
+/**
+ * Why nextMove rejected an update. `error` stays a readable message; `code` is
+ * stable, so callers can branch on it:
+ * - INVALID_PREVIOUS: the previous PGN doesn't parse (a bug on our side).
+ * - GAME_OVER: the previous game already ended (checkmate, stalemate, a draw,
+ *   or a final result 1-0 / 0-1 / 1/2-1/2), even if the update drops the result.
+ * - INVALID_PGN: the new PGN doesn't parse or contains an illegal move.
+ * - CHANGED_MOVE: an earlier move was rewritten or removed.
+ * - NO_NEW_MOVE: same moves as before (e.g. only tags or comments changed).
+ * - TOO_MANY_MOVES: more than one move was added.
+ *
+ * @typedef {'INVALID_PREVIOUS' | 'GAME_OVER' | 'INVALID_PGN' | 'CHANGED_MOVE' | 'NO_NEW_MOVE' | 'TOO_MANY_MOVES'} NextMoveCode
+ */
+
+/**
+ * Checks that an updated PGN is the previous one plus exactly one legal move,
+ * and returns that move. Use it whenever an opponent's game record changes:
+ * it rejects rewritten or removed earlier moves, updates with no new move,
+ * several moves at once, and any move after the game ended. Moves are
+ * compared, not text, so tags, comments and spacing don't matter.
+ *
+ * @param {string} oldPgn - The game as last accepted ("" before the first move).
+ * @param {string} newPgn - The updated record.
+ * @returns {{ ok: true, value: { uci: string, san: string, color: 'w' | 'b', state: GameState } }
+ *   | { ok: false, error: string, code: NextMoveCode }}
+ *   `color` is the side that made the move, so callers can check it was that
+ *   player's turn; `state` is the position after it. On failure, `code` says
+ *   why (see NextMoveCode) and `error` is a message for logs or display.
+ * @example nextMove('1. e4', '1. e4 e5') // { ok: true, value: { uci: 'e7e5', san: 'e5', color: 'b', state } }
+ * @example nextMove('1. e4', '1. d4') // { ok: false, error: 'Move 1 was changed or removed', code: 'CHANGED_MOVE' }
+ */
+export function nextMove(oldPgn, newPgn) {
+  const before = parsePGN(oldPgn);
+  if (!before.ok) {
+    return { ok: false, error: `Previous PGN: ${before.error}`, code: 'INVALID_PREVIOUS' };
+  }
+  const finished = checkNotFinished(before.value.result);
+  if (!finished.ok) {
+    return { ...finished, code: 'GAME_OVER' };
+  }
+  if (before.value.state.status !== 'active') {
+    return { ok: false, error: 'The game is already over', code: 'GAME_OVER' };
+  }
+  const after = parsePGN(newPgn);
+  if (!after.ok) {
+    return { ...after, code: 'INVALID_PGN' };
+  }
+
+  const previous = before.value.sans;
+  const updated = after.value.sans;
+  const changed = previous.findIndex((san, i) => updated[i] !== san);
+  if (changed !== -1) {
+    return { ok: false, error: `Move ${changed + 1} was changed or removed`, code: 'CHANGED_MOVE' };
+  }
+
+  const added = updated.length - previous.length;
+  if (added !== 1) {
+    return added === 0
+      ? { ok: false, error: 'No new move', code: 'NO_NEW_MOVE' }
+      : { ok: false, error: `Expected one new move, found ${added}`, code: 'TOO_MANY_MOVES' };
+  }
+
+  return {
+    ok: true,
+    value: {
+      uci: /** @type {string} */ (after.value.ucis.at(-1)),
+      san: /** @type {string} */ (updated.at(-1)),
+      color: before.value.state.currentTurn,
+      state: after.value.state,
+    },
+  };
 }

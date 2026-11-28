@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { sqIndex } from '../0x88helper.js';
 import * as engineModule from '../index.js';
 import {
   START_FEN,
@@ -13,6 +14,8 @@ import {
   isInCheck,
   getGameStatus,
   GameStatetoFEN,
+  toSAN,
+  fromSAN,
 } from '../index.js';
 
 /** Apply moves that must all be legal; fails the test otherwise. */
@@ -57,6 +60,11 @@ describe('public API surface', () => {
       'GameStatetoFEN',
       'moveToUCI',
       'UCItoMove',
+      'toSAN',
+      'fromSAN',
+      'replayPGN',
+      'appendMove',
+      'nextMove',
       'printBoard',
     ];
     for (const name of expected) {
@@ -90,6 +98,8 @@ describe('public API surface', () => {
       getGameStatus(state);
       toGrid(state);
       GameStatetoFEN(state);
+      toSAN(state, 'g1f3');
+      fromSAN(state, 'Nf3');
     }).not.toThrow();
   });
 });
@@ -102,6 +112,35 @@ describe('createGame', () => {
   it('accepts a custom FEN', () => {
     const fen = '4k3/8/8/8/8/8/8/4K3 w - - 0 1';
     expect(GameStatetoFEN(createGame(fen))).toBe(fen);
+  });
+
+  it('rejects a position unless each side has exactly one king', () => {
+    expect(() => createGame('8/8/8/8/8/8/4P3/4K3 w - - 0 1')).toThrow(/exactly one king/);
+    expect(() => createGame('4k3/8/8/8/8/8/8/2K1K3 w - - 0 1')).toThrow(/exactly one king/);
+    expect(replayMoves(['e2e4'], '8/8/8/8/8/8/4P3/4K3 w - - 0 1')).toMatchObject({
+      ok: false,
+      error: /Invalid start position/,
+    });
+  });
+
+  it('keeps old states unchanged: shared pieces and move records are frozen', () => {
+    const before = createGame();
+    const after = applyMove(before, 'e2e4').value;
+    const later = applyMove(after, 'e7e5').value;
+
+    // The new state shares the a1 rook with the old one, but it can't be changed.
+    expect(after.board[sqIndex('a1')]).toBe(before.board[sqIndex('a1')]);
+    expect(() => {
+      after.board[sqIndex('a1')].type = 'q';
+    }).toThrow(TypeError);
+    expect(() => {
+      later.moveHistory[0].from.col = 0;
+    }).toThrow(TypeError);
+    expect(GameStatetoFEN(before)).toBe(START_FEN);
+    expect(after.moveHistory[0].from).toEqual({ row: 6, col: 4 });
+
+    const promoted = applyMove(createGame('8/P6k/8/8/8/8/8/K7 w - - 0 1'), 'a7a8q').value;
+    expect(Object.isFrozen(promoted.board[sqIndex('a8')])).toBe(true);
   });
 
   it('returns a fresh, unshared object every call', () => {

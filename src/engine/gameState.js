@@ -9,10 +9,12 @@ import {
   fromSquare,
   onBoard,
   sqIndex,
+  sqName,
+  toIndex,
   toSquare,
 } from './0x88helper.js';
 import { boardAfterMove, isAttacked, moveGenerator } from './moveGeneration.js';
-import { UCItoMove, GameStatetoFEN } from './notation.js';
+import { UCItoMove } from './notation.js';
 
 /** @typedef {import('./types.js').GameState} GameState */
 /** @typedef {import('./types.js').Color} Color */
@@ -173,6 +175,44 @@ function clearRookRight(rights, square, color) {
 }
 
 /**
+ * The piece-placement field of a FEN, e.g. "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR".
+ * @param {import('./types.js').Board0x88} board
+ * @returns {string}
+ */
+function placementField(board) {
+  const ranks = [];
+  for (let row = 0; row < 8; row++) {
+    let rank = '';
+    let empty = 0;
+    for (let col = 0; col < 8; col++) {
+      const piece = board[toIndex(row, col)];
+      if (!piece) {
+        empty++;
+        continue;
+      }
+      rank += (empty || '') + (piece.color === 'w' ? piece.type.toUpperCase() : piece.type);
+      empty = 0;
+    }
+    ranks.push(rank + (empty || ''));
+  }
+  return ranks.join('/');
+}
+
+/**
+ * The castling field of a FEN: "KQkq", a subset of it, or "-".
+ * @param {import('./types.js').CastlingRights} rights
+ * @returns {string}
+ */
+function castlingField(rights) {
+  const field =
+    (rights.wKingside ? 'K' : '') +
+    (rights.wQueenside ? 'Q' : '') +
+    (rights.bKingside ? 'k' : '') +
+    (rights.bQueenside ? 'q' : '');
+  return field || '-';
+}
+
+/**
  * A repetition key contains the first four FEN fields, excluding move counters.
  * An en passant square matters only when the side to move can legally capture it.
  *
@@ -180,7 +220,14 @@ function clearRookRight(rights, square, color) {
  * @returns {string}
  */
 function positionKey(state) {
-  const fields = GameStatetoFEN(state).split(' ');
+  // Built directly instead of through GameStatetoFEN: this runs after every move, and
+  // GameStatetoFEN re-validates the whole state each time. Same text as its first 4 fields.
+  const fields = [
+    placementField(state.board),
+    state.currentTurn,
+    castlingField(state.castlingRights),
+    state.enPassantTarget === null ? '-' : sqName(state.enPassantTarget),
+  ];
   const target = state.enPassantTarget;
   if (target !== null) {
     const forward = state.currentTurn === 'w' ? NORTH : SOUTH;

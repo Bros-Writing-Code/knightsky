@@ -74,26 +74,13 @@
 /**
  * The current status of a chess game.
  *
- * @typedef {
- *   'active' |
- *   'checkmate' |
- *   'stalemate' |
- *   'draw'
- * } GameStatus
+ * @typedef {'active' | 'checkmate' | 'stalemate' | 'draw'} GameStatus
  */
 
 /**
  * The reason a game ended in a draw.
  *
- * @typedef {
- *   'stalemate' |
- *   'insufficient-material' |
- *   'threefold-repetition' |
- *   'fivefold-repetition' |
- *   'fifty-move-rule' |
- *   'seventy-five-move-rule' |
- *   'agreement'
- * } DrawReason
+ * @typedef {'stalemate' | 'insufficient-material' | 'threefold-repetition' | 'fivefold-repetition' | 'fifty-move-rule' | 'seventy-five-move-rule' | 'agreement'} DrawReason
  */
 
 /**

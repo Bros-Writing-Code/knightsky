@@ -254,8 +254,10 @@ export function materialCount(state) {
   const value = (side) =>
     Object.entries(side).reduce((sum, [type, count]) => sum + count * PIECE_VALUES[type], 0);
   const more = (side, other) =>
-    Object.fromEntries(
-      Object.entries(side).map(([type, count]) => [type, Math.max(0, count - other[type])]),
+    /** @type {Record<'p'|'n'|'b'|'r'|'q', number>} */ (
+      Object.fromEntries(
+        Object.entries(side).map(([type, count]) => [type, Math.max(0, count - other[type])]),
+      )
     );
   return {
     white: counts.w,

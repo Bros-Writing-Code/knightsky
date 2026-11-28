@@ -4,10 +4,22 @@ The app is currently deployed on GitHub Pages at <https://knightsky.app/>.
 
 ## How it works
 
-- For every PR the `CI` workflow (`.github/workflows/ci.yaml`) runs four separate checks: `lint`, `format`, `test` and `build`. PRs never deploy.
-- For every push to `main` (a merged PR), the same checks run again, the build is packed, and the `deploy` job publishes it only if all four pass.
+- For every PR, the `CI` workflow (`.github/workflows/ci.yaml`) runs six jobs: `lint`, `format`, `test`, `build`, `typecheck`, and `code-reports`. PRs never deploy.
+- For every push to `main`, the same jobs run again. The build is packed, and deployment waits for `lint`, `format`, `test`, `build`, and `typecheck` to pass.
+- `typecheck` checks JavaScript files marked `// @ts-check`.
+- `code-reports` publishes reports for unused files, unused packages, and copied code to the workflow run's Summary page. Findings are advisory, and unused-export reports are disabled. Reporting tool failures fail the reporting job. This job is not a deployment prerequisite.
 - `SITE_URL` is the only place the site's URL lives. It's a repo variable (Settings → Secrets and variables → Actions → Variables). `vite.config.js` turns its path into Vite's `base`. It's unset locally, so dev serves from `/`.
 - The site uses a custom domain, so renaming the repo doesn't change its URL.
+
+## Local code checks
+
+| Command                     | Purpose                          |
+| --------------------------- | -------------------------------- |
+| `npm run typecheck`         | Check opted-in JavaScript files  |
+| `npm run report:dead-code`  | Report unused files and packages |
+| `npm run report:duplicates` | Report copied code               |
+
+The local copied-code Markdown report is saved to `reports/duplicates/jscpd-report.md`. Generated reports are ignored by Git.
 
 To check a production build locally:
 

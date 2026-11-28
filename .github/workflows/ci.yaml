@@ -49,6 +49,77 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Check JavaScript types
+        run: npm run typecheck
+
+  code-reports:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        id: install
+        run: npm ci
+
+      - name: Report unused files and packages
+        id: dead_code
+        run: npm run --silent report:dead-code > "$RUNNER_TEMP/dead-code.md"
+
+      - name: Report copied code
+        id: duplicates
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          npm run --silent report:duplicates -- --no-colors --no-tips | tee "$RUNNER_TEMP/duplicates.txt"
+          test -s reports/duplicates/jscpd-report.md
+
+      - name: Publish code reports
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          DEAD_CODE_OUTCOME: ${{ steps.dead_code.outcome }}
+          DUPLICATES_OUTCOME: ${{ steps.duplicates.outcome }}
+        run: |
+          {
+            echo '## Code reports'
+            echo
+            echo 'Findings are advisory. Unused-export reporting is disabled.'
+            echo
+            echo '### Unused files and packages'
+            echo
+            if [ "$DEAD_CODE_OUTCOME" != "success" ]; then
+              echo '**The unused-code report failed.** See the job log.'
+            elif [ -s "$RUNNER_TEMP/dead-code.md" ]; then
+              cat "$RUNNER_TEMP/dead-code.md"
+            else
+              echo 'No unused files or packages were reported.'
+            fi
+            echo
+            echo '### Copied code'
+            echo
+            if [ "$DUPLICATES_OUTCOME" != "success" ]; then
+              echo '**The copied-code report failed.** See the job log.'
+            else
+              cat reports/duplicates/jscpd-report.md
+              echo
+              echo '```text'
+              cat "$RUNNER_TEMP/duplicates.txt"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -67,7 +138,7 @@ jobs:
           path: dist
 
   deploy:
-    needs: [lint, format, test, build] # deploy only if every check passed
+    needs: [lint, format, test, build, typecheck] # deploy only if all blocking checks passed
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

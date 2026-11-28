@@ -5,7 +5,8 @@
 - The chessground demo (`src/app/chessground-demo`) uses `src/engine` through the `game.js` adapter.
 - Engine code is plain JS: plain objects with separate functions, no piece classes (ADR 0003), and a 0x88 board (ADR 0002).
 - See `docs/ubiquitous_language.md`.
-- There are lint scripts. Use `npm test`, `npm run build`, `npm run dev`, `npm run lint`, `npm run lint:fix`, `npm run format`, and `npm run format:check`. No typecheck script yet.
+- Available commands: `npm test`, `npm run build`, `npm run dev`, `npm run lint`, `npm run lint:fix`, `npm run format`, `npm run format:check`, `npm run typecheck`, `npm run report:dead-code`, and `npm run report:duplicates`.
+- JavaScript type checking is opt-in with `// @ts-check`. Reports cover unused files, unused packages, and copied code. Findings are advisory; unused-export reporting is disabled.
 - This is a course project with a short deadline, so prefer simple solutions over new tooling.
 - Never commit to `main`. Branch from an up-to-date `main`. Changes merge only through a PR with a merge commit, after approval from a different human.
 

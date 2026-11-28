@@ -330,7 +330,10 @@ function parsePGN(pgn) {
   for (let i = 0; i < moves.length; i++) {
     const token = moves[i];
     const match = matchSAN(state, token);
-    const result = match.ok ? applyMove(state, match.value.uci) : match;
+    if (!match.ok) {
+      return { ok: false, error: `Move ${i + 1} (${token}): ${match.error}` };
+    }
+    const result = applyMove(state, match.value.uci);
     if (!result.ok) {
       return { ok: false, error: `Move ${i + 1} (${token}): ${result.error}` };
     }

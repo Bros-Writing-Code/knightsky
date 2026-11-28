@@ -7,6 +7,7 @@ import {
   fromSquare,
   onBoard,
   pieceAt,
+  colOf,
   rowOf,
   toIndex,
   toSquare,
@@ -121,19 +122,28 @@ export function isAttacked(board, target, color) {
       return true;
     }
   }
-  for (const direction of ALL_DIRECTIONS) {
-    const diagonal = DIAGONALS.includes(direction);
-    let distance = 1;
-    for (let from = target + direction; onBoard(from); from += direction, distance++) {
-      const attacker = pieceAt(board, from);
+  return (
+    attackedAlong(board, target, color, DIAGONALS, 'b') ||
+    attackedAlong(board, target, color, STRAIGHTS, 'r')
+  );
+}
+
+// Slide from the target in each direction until the first piece. It attacks the target if it
+// is an enemy queen, an enemy `slider` (bishop on diagonals, rook on straights), or an enemy
+// king right next to the target.
+function attackedAlong(board, target, color, directions, slider) {
+  for (const direction of directions) {
+    // `from` is always a whole number here, so the bit test alone (as in onBoard) is enough.
+    for (let from = target + direction; from >= 0 && (from & 0x88) === 0; from += direction) {
+      const attacker = board[from];
       if (!attacker) {
         continue;
       }
       if (
         attacker.color === color &&
         (attacker.type === 'q' ||
-          (diagonal ? attacker.type === 'b' : attacker.type === 'r') ||
-          (distance === 1 && attacker.type === 'k'))
+          attacker.type === slider ||
+          (attacker.type === 'k' && from === target + direction))
       ) {
         return true;
       }
@@ -246,6 +256,30 @@ export function boardAfterMove(state, board, from, to, piece) {
   return next;
 }
 
+// True if the piece shares a line with its king and nothing stands between them, so moving it
+// could open that line to an enemy rook, bishop or queen. Cautious on purpose: it doesn't
+// look for the attacker; such pieces just get the full legality check.
+function mayBePinned(board, king, from) {
+  const rows = rowOf(from) - rowOf(king);
+  const cols = colOf(from) - colOf(king);
+  if (rows !== 0 && cols !== 0 && Math.abs(rows) !== Math.abs(cols)) {
+    return false;
+  }
+  const step = Math.sign(rows) * SOUTH + Math.sign(cols) * EAST;
+  for (let square = king + step; square !== from; square += step) {
+    if (board[square]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// En passant removes a pawn from a square the move doesn't touch, which can open a line to
+// the king, so it always gets the full legality check.
+function isEnPassant(state, board, to, piece) {
+  return piece.type === 'p' && to === state.enPassantTarget && !board[to];
+}
+
 // Return legal target squares for the current player's selected piece without mutating state.
 export function moveGenerator(state, selectedSquare) {
   const from = indexOf(selectedSquare);
@@ -258,10 +292,23 @@ export function moveGenerator(state, selectedSquare) {
     return [];
   }
   const enemy = piece.color === 'w' ? 'b' : 'w';
+  // Only a king move changes where the king is, so find it once, not once per candidate.
+  const kingSquare = findKing(board, piece.color);
+  // A move can only expose its own king if it is a king move, the king is already in check,
+  // the piece may be pinned, or it is an en passant capture. Every other candidate is legal
+  // without simulating it.
+  const checkEach =
+    piece.type === 'k' ||
+    kingSquare < 0 ||
+    mayBePinned(board, kingSquare, from) ||
+    isAttacked(board, kingSquare, enemy);
   return candidates(state, board, from, piece)
     .filter((to) => {
+      if (!checkEach && !isEnPassant(state, board, to, piece)) {
+        return true;
+      }
       const next = boardAfterMove(state, board, from, to, piece);
-      const king = piece.type === 'k' ? to : findKing(next, piece.color);
+      const king = piece.type === 'k' ? to : kingSquare;
       return king < 0 || !isAttacked(next, king, enemy);
     })
     .map(toSquare);

@@ -1,4 +1,4 @@
-# ADR 0008: Add type checking and code reports to CI
+# ADR 0009: Add type checking and code reports to CI
 
 - **Status:** Proposed
 - **Date:** 2026-11-24

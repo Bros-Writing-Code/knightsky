@@ -176,7 +176,7 @@ function clearRookRight(rights, square, color) {
 
 /**
  * The piece-placement field of a FEN, e.g. "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR".
- * @param {import('./types.js').Board0x88} board
+ * @param {import('./0x88helper.js').Board0x88} board
  * @returns {string}
  */
 function placementField(board) {

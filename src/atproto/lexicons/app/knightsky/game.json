@@ -5,7 +5,7 @@
     "main": {
       "type": "record",
       "key": "tid",
-      "description": "A player's mutable copy of a chess game. Without challenge this record is an invitation; with challenge it accepts the referenced invitation. Update the same record key after each move or resignation.",
+      "description": "A player's mutable copy of a chess game. Without challenge this record is an invitation; with challenge it accepts the referenced invitation. Update the same record key after each move, draw offer, or game end.",
       "record": {
         "type": "object",
         "required": ["opponent", "color", "pgn", "fen", "status"],
@@ -38,9 +38,62 @@
           },
           "status": {
             "type": "string",
-            "enum": ["active", "resigned"],
-            "description": "Resigned means this record's owner has resigned. Active means no resignation by this owner; checkmate and automatic draws are derived by the engine from the accepted history."
+            "enum": ["active", "drawOffered", "ended"],
+            "description": "active: the game is in progress. drawOffered: the game is in progress and this record's owner offers a draw. ended: this record's owner considers the game over; termination and result must then be present (enforced by clients, not the Lexicon)."
+          },
+          "termination": {
+            "type": "string",
+            "minLength": 1,
+            "knownValues": [
+              "checkmate",
+              "resignation",
+              "agreement",
+              "timeout",
+              "stalemate",
+              "insufficientMaterial",
+              "threefoldRepetition",
+              "fivefoldRepetition",
+              "fiftyMoveRule",
+              "seventyFiveMoveRule"
+            ],
+            "description": "How the game ended. Present only when status is ended. A claim by the owner: clients must verify it against the replayed history and the opponent's record."
+          },
+          "result": {
+            "type": "string",
+            "enum": ["win", "loss", "draw"],
+            "description": "The outcome from this record owner's perspective. Present only when status is ended. A claim by the owner: clients must verify it."
+          },
+          "clock": {
+            "type": "ref",
+            "ref": "#clock",
+            "description": "Present in timed games, absent in untimed games. The challenger sets initialMs and incrementMs; the accepting player copies them, and neither player changes them later."
           }
+        }
+      }
+    },
+    "clock": {
+      "type": "object",
+      "required": ["initialMs", "incrementMs", "remainingMs"],
+      "properties": {
+        "initialMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Each player's starting time in milliseconds."
+        },
+        "incrementMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Milliseconds added to a player's clock after each of their moves."
+        },
+        "remainingMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The owner's time left in milliseconds after their latest move, including any increment. Equals initialMs before the owner's first move. A claim by the owner: clients check it against observed timing and reject with badClock if it does not add up."
+        },
+        "movedAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "When the owner made their latest move. Absent before the owner's first move. Lets a client rebuilding from the PDS work out how long the current turn has run."
         }
       }
     }

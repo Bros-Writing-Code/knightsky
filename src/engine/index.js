@@ -19,6 +19,7 @@ export { applyMove } from './gameState.js';
 
 // Game status
 export { isInCheck, getGameStatus } from './gameState.js';
+export { materialCount } from './game.js';
 
 // Notation
 // To load a position from a FEN, use createGame(fen): it also sets the status.

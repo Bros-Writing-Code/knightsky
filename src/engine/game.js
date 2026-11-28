@@ -218,3 +218,49 @@ export function replayMoves(ucis, startFen = START_FEN) {
 
   return { ok: true, value: state };
 }
+
+/** Material value of each piece type; kings aren't counted. */
+const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+
+/**
+ * The material on the board now: each side's pieces (kings excluded), the
+ * pieces each side has more of than the other, and the point difference.
+ * For a material display like lichess's: show `ahead.white` and `ahead.black`
+ * beside each player, with `difference` as "+N" for the side that is ahead.
+ *
+ * This describes the current board only, not which pieces were captured: the
+ * starting set minus these counts is wrong after a promotion (one fewer pawn,
+ * one more queen, yet nothing was captured). `ahead` stays correct then.
+ *
+ * @param {GameState} state
+ * @returns {{
+ *   white: Record<'p'|'n'|'b'|'r'|'q', number>,
+ *   black: Record<'p'|'n'|'b'|'r'|'q', number>,
+ *   ahead: { white: Record<'p'|'n'|'b'|'r'|'q', number>, black: Record<'p'|'n'|'b'|'r'|'q', number> },
+ *   difference: number,
+ * }}
+ *   `ahead.white.q` is how many more queens White has than Black (0 if not more).
+ *   `difference` is White's material minus Black's (pawn 1, knight/bishop 3, rook 5, queen 9).
+ * @example materialCount(createGame()) // { white: { p: 8, n: 2, b: 2, r: 2, q: 1 }, black: { ... }, ahead: { white: { p: 0, ... }, black: { ... } }, difference: 0 }
+ */
+export function materialCount(state) {
+  const counts = { w: { p: 0, n: 0, b: 0, r: 0, q: 0 }, b: { p: 0, n: 0, b: 0, r: 0, q: 0 } };
+  for (const index of SQUARES) {
+    const piece = state.board[index];
+    if (piece && piece.type !== 'k') {
+      counts[piece.color][piece.type]++;
+    }
+  }
+  const value = (side) =>
+    Object.entries(side).reduce((sum, [type, count]) => sum + count * PIECE_VALUES[type], 0);
+  const more = (side, other) =>
+    Object.fromEntries(
+      Object.entries(side).map(([type, count]) => [type, Math.max(0, count - other[type])]),
+    );
+  return {
+    white: counts.w,
+    black: counts.b,
+    ahead: { white: more(counts.w, counts.b), black: more(counts.b, counts.w) },
+    difference: value(counts.w) - value(counts.b),
+  };
+}

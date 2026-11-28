@@ -19,10 +19,14 @@ export { applyMove } from './gameState.js';
 
 // Game status
 export { isInCheck, getGameStatus } from './gameState.js';
+export { materialCount } from './game.js';
 
 // Notation
 // To load a position from a FEN, use createGame(fen): it also sets the status.
 export { GameStatetoFEN, moveToUCI, UCItoMove } from './notation.js';
+
+// PGN, the move history format of AT game records (moves inside the engine stay UCI)
+export { toSAN, fromSAN, replayPGN, appendMove, nextMove } from './pgn.js';
 
 // Debugging only: printBoard(state.board) prints an ASCII board
 export { printBoard } from './0x88helper.js';

@@ -7,7 +7,7 @@
  */
 
 import { SQUARES, toIndex, toSquare } from './0x88helper.js';
-import { applyMove, getGameStatus } from './gameState.js';
+import { applyMove, checkMove, getGameStatus } from './gameState.js';
 import { moveGenerator } from './moveGeneration.js';
 import { FENtoGameState, moveToUCI } from './notation.js';
 
@@ -29,12 +29,36 @@ export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0
  *
  * @param {string} [fen=START_FEN] - Starting position.
  * @returns {GameState}
- * @throws {Error} If the FEN is malformed (use replayMoves for untrusted input).
+ * @throws {Error} If the FEN is malformed or a side doesn't have exactly one king
+ *   (use replayMoves for untrusted input).
  * @example const state = createGame();
  */
 export function createGame(fen = START_FEN) {
   const state = FENtoGameState(fen);
+  assertOneKingEach(state);
+  // States share piece objects (see applyMove), so freeze them: changing a piece
+  // in any state throws instead of silently changing older states too.
+  for (const piece of state.board) {
+    if (piece) {
+      Object.freeze(piece);
+    }
+  }
   return { ...state, ...getGameStatus(state) };
+}
+
+/**
+ * Checked once when a game is created, so applyMove doesn't recheck it on
+ * every move. Without both kings, check and checkmate have no meaning.
+ *
+ * @param {GameState} state
+ * @throws {Error} Unless each side has exactly one king.
+ */
+function assertOneKingEach(state) {
+  const kings = SQUARES.map((index) => state.board[index]).filter((piece) => piece?.type === 'k');
+  const white = kings.filter((king) => king?.color === 'w').length;
+  if (kings.length !== 2 || white !== 1) {
+    throw new Error('Invalid position: each side needs exactly one king');
+  }
 }
 
 /**
@@ -158,7 +182,8 @@ export function legalMoves(state) {
  * @returns {boolean}
  */
 export function isValidMove(state, uci) {
-  return applyMove(state, uci).ok;
+  // Only the legality check: no new state, histories or game status.
+  return checkMove(state, uci).ok;
 }
 
 /**
@@ -192,4 +217,50 @@ export function replayMoves(ucis, startFen = START_FEN) {
   }
 
   return { ok: true, value: state };
+}
+
+/** Material value of each piece type; kings aren't counted. */
+const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+
+/**
+ * The material on the board now: each side's pieces (kings excluded), the
+ * pieces each side has more of than the other, and the point difference.
+ * For a material display like lichess's: show `ahead.white` and `ahead.black`
+ * beside each player, with `difference` as "+N" for the side that is ahead.
+ *
+ * This describes the current board only, not which pieces were captured: the
+ * starting set minus these counts is wrong after a promotion (one fewer pawn,
+ * one more queen, yet nothing was captured). `ahead` stays correct then.
+ *
+ * @param {GameState} state
+ * @returns {{
+ *   white: Record<'p'|'n'|'b'|'r'|'q', number>,
+ *   black: Record<'p'|'n'|'b'|'r'|'q', number>,
+ *   ahead: { white: Record<'p'|'n'|'b'|'r'|'q', number>, black: Record<'p'|'n'|'b'|'r'|'q', number> },
+ *   difference: number,
+ * }}
+ *   `ahead.white.q` is how many more queens White has than Black (0 if not more).
+ *   `difference` is White's material minus Black's (pawn 1, knight/bishop 3, rook 5, queen 9).
+ * @example materialCount(createGame()) // { white: { p: 8, n: 2, b: 2, r: 2, q: 1 }, black: { ... }, ahead: { white: { p: 0, ... }, black: { ... } }, difference: 0 }
+ */
+export function materialCount(state) {
+  const counts = { w: { p: 0, n: 0, b: 0, r: 0, q: 0 }, b: { p: 0, n: 0, b: 0, r: 0, q: 0 } };
+  for (const index of SQUARES) {
+    const piece = state.board[index];
+    if (piece && piece.type !== 'k') {
+      counts[piece.color][piece.type]++;
+    }
+  }
+  const value = (side) =>
+    Object.entries(side).reduce((sum, [type, count]) => sum + count * PIECE_VALUES[type], 0);
+  const more = (side, other) =>
+    Object.fromEntries(
+      Object.entries(side).map(([type, count]) => [type, Math.max(0, count - other[type])]),
+    );
+  return {
+    white: counts.w,
+    black: counts.b,
+    ahead: { white: more(counts.w, counts.b), black: more(counts.b, counts.w) },
+    difference: value(counts.w) - value(counts.b),
+  };
 }

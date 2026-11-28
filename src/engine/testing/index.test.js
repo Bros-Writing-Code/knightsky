@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { sqIndex } from '../0x88helper.js';
 import * as engineModule from '../index.js';
 import {
   START_FEN,
@@ -12,7 +13,10 @@ import {
   applyMove,
   isInCheck,
   getGameStatus,
+  materialCount,
   GameStatetoFEN,
+  toSAN,
+  fromSAN,
 } from '../index.js';
 
 /** Apply moves that must all be legal; fails the test otherwise. */
@@ -54,9 +58,15 @@ describe('public API surface', () => {
       'applyMove',
       'isInCheck',
       'getGameStatus',
+      'materialCount',
       'GameStatetoFEN',
       'moveToUCI',
       'UCItoMove',
+      'toSAN',
+      'fromSAN',
+      'replayPGN',
+      'appendMove',
+      'nextMove',
       'printBoard',
     ];
     for (const name of expected) {
@@ -90,6 +100,8 @@ describe('public API surface', () => {
       getGameStatus(state);
       toGrid(state);
       GameStatetoFEN(state);
+      toSAN(state, 'g1f3');
+      fromSAN(state, 'Nf3');
     }).not.toThrow();
   });
 });
@@ -102,6 +114,35 @@ describe('createGame', () => {
   it('accepts a custom FEN', () => {
     const fen = '4k3/8/8/8/8/8/8/4K3 w - - 0 1';
     expect(GameStatetoFEN(createGame(fen))).toBe(fen);
+  });
+
+  it('rejects a position unless each side has exactly one king', () => {
+    expect(() => createGame('8/8/8/8/8/8/4P3/4K3 w - - 0 1')).toThrow(/exactly one king/);
+    expect(() => createGame('4k3/8/8/8/8/8/8/2K1K3 w - - 0 1')).toThrow(/exactly one king/);
+    expect(replayMoves(['e2e4'], '8/8/8/8/8/8/4P3/4K3 w - - 0 1')).toMatchObject({
+      ok: false,
+      error: /Invalid start position/,
+    });
+  });
+
+  it('keeps old states unchanged: shared pieces and move records are frozen', () => {
+    const before = createGame();
+    const after = applyMove(before, 'e2e4').value;
+    const later = applyMove(after, 'e7e5').value;
+
+    // The new state shares the a1 rook with the old one, but it can't be changed.
+    expect(after.board[sqIndex('a1')]).toBe(before.board[sqIndex('a1')]);
+    expect(() => {
+      after.board[sqIndex('a1')].type = 'q';
+    }).toThrow(TypeError);
+    expect(() => {
+      later.moveHistory[0].from.col = 0;
+    }).toThrow(TypeError);
+    expect(GameStatetoFEN(before)).toBe(START_FEN);
+    expect(after.moveHistory[0].from).toEqual({ row: 6, col: 4 });
+
+    const promoted = applyMove(createGame('8/P6k/8/8/8/8/8/K7 w - - 0 1'), 'a7a8q').value;
+    expect(Object.isFrozen(promoted.board[sqIndex('a8')])).toBe(true);
   });
 
   it('returns a fresh, unshared object every call', () => {
@@ -308,5 +349,48 @@ describe('FEN round-trip', () => {
     for (const name of ['toFEN', 'fromFEN', 'FENtoGameState']) {
       expect(engine[name], name).toBeUndefined();
     }
+  });
+});
+
+describe('materialCount', () => {
+  const full = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+  const none = { p: 0, n: 0, b: 0, r: 0, q: 0 };
+
+  it('counts the full set at the start, with no difference', () => {
+    expect(materialCount(createGame())).toEqual({
+      white: full,
+      black: full,
+      ahead: { white: none, black: none },
+      difference: 0,
+    });
+  });
+
+  it('updates after a capture', () => {
+    let state = createGame();
+    for (const uci of ['e2e4', 'd7d5', 'e4d5']) {
+      state = applyMove(state, uci).value;
+    }
+    const count = materialCount(state);
+    expect(count.black.p).toBe(7);
+    expect(count.ahead).toEqual({ white: { ...none, p: 1 }, black: none });
+    expect(count.difference).toBe(1);
+  });
+
+  it('stays correct after a promotion with no capture (review on #103)', () => {
+    // White promoted a pawn and nothing was captured: 7 pawns and 2 queens against the full set.
+    const count = materialCount(
+      createGame('rnbqkbnr/pppppppp/8/8/3Q4/8/1PPPPPPP/RNBQKBNR b KQkq - 0 1'),
+    );
+    expect(count.white).toEqual({ p: 7, n: 2, b: 2, r: 2, q: 2 });
+    expect(count.ahead).toEqual({ white: { ...none, q: 1 }, black: { ...none, p: 1 } });
+    expect(count.difference).toBe(8);
+  });
+
+  it('counts a promoted piece as its new type', () => {
+    const before = createGame('8/P6k/8/8/8/8/8/K7 w - - 0 1');
+    expect(materialCount(before).difference).toBe(1);
+    const after = materialCount(applyMove(before, 'a7a8q').value);
+    expect(after.white).toEqual({ p: 0, n: 0, b: 0, r: 0, q: 1 });
+    expect(after.difference).toBe(9);
   });
 });

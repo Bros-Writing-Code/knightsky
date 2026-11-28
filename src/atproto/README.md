@@ -2,24 +2,23 @@
 
 Authors: James Keys and Adarsh Shetkar
 
-- [Lexicon options](lexicon-options.md)
-- [OAuth login](#oauth-login)
-
 ## OAuth Sign In 
 
 [auth.js](./auth.js) signs a player in with their AT Protocol account. The app is a browser-only public client (no server, no secret), see [ADR 0007](../../docs/adr/0007-atproto-oauth-sign-in.md).
 
 | Function | What it does |
 | --- | --- |
-| `initAuth()` | Call once on page load. Finishes a login redirect if the URL has one, otherwise restores the saved session. Returns the session, or `undefined` when nobody is signed in. |
-| `signIn(handle)` | Sends the browser to the player's PDS to approve the login. The page comes back through `initAuth()`. |
-| `getProfile(did)` | Looks up `{ handle, displayName? }` from Bluesky's public AppView. Needs no login and throws if the lookup fails. |
+| `initAuth()` | Call once on page load. Finishes a sign in redirect if the URL has one, otherwise restores the saved session. Returns the session, or `undefined` when nobody is signed in. |
+| `signIn(handle)` | Sends the browser to the player's PDS to approve the sign in. The page comes back through `initAuth()`. |
+| `getProfile(did)` | Looks up `{ handle, displayName? }` from Bluesky's public AppView. Needs no sign in and throws if the lookup fails. |
 | `signOut(session)` | Signs the session out. |
-| `onSessionDeleted(callback)` | Runs on a session deletion (happens on any sign out attempt, even if failed) |
+| `onSessionDeleted(callback)` | Runs when the library deletes a session (happens on any sign out attempt, even if failed). |
 
 The session only carries the DID (`session.sub`), so use `getProfile` to show a name. Only the `atproto` scope is requested for now. Locally the library's loopback client is used. In production `client-metadata.json` is generated from `SITE_URL`, see [Deployment](../../docs/deployment.md).
 
 ## Lexicon
+
+Our overall design principle is to treat opponents' moves as untrusted user data. We always validate their moves on our client with the chess engine to ensure that we agree on the current state of the game.
 
 ### [Game](./lexicons/app/knightsky/game.json)
 
@@ -50,6 +49,43 @@ The session only carries the DID (`session.sub`), so use `getProfile` to show a 
 | `badPrev` | The move history does not extend the last accepted history by exactly one ply. |
 | `illegalMove` | The appended move is illegal. |
 | `badFEN` | The supplied FEN differs from the position computed from PGN. |
+
+### How a Game is Played
+
+What follows is a description of the communication flow between clients. 
+
+1. Signed in player Alice wants to challenge Bob to a game of chess.
+2. Alice types in Bob's handle in the frontend and clicks a button.
+3. Alice's client takes the following actions:
+  1. Searches for Bob's DID using his handle. Assuming it finds it... 
+  2. Creates a game record with an empty PGN and the starting FEN, Alice as the white player, Bob as the challenged player.
+  3. Creates an url that includes the AT URI for the new game record.
+4. Alice sends this to Bob
+5. Bob opens the link and signs into the chess app with his atproto handle
+6. Bob's client...
+  1. parses the AT URI, which gives the challenger's DID + collection + rkey.
+  2. resolves the challenger's DID to a PDS endpoint
+  3. gets Alice's game record from that PDS
+  4. Checks the `opponent` field in that record and matches it against Bob's DID. If they don't match, this challenge is for someone else.
+  5. If it's a match, Bob writes his own `game` record, which strong refs the challenge and sets his color to be opposite Alice's and starts watching the challenger's repo. 
+7. Alice's client listens for `game` records from Bob's DID whose `challenge` points at her record.
+8. Alice makes a move on the UI.
+9. The client updates her `game` record by appending the move on the PGN notation and rewriting the FEN. 
+10. Bob's client detects the update with his filtered Jetstream listener.
+11. If Alice updated her status to `resigned`, the game is over and Bob takes no further actions.
+12. Bob's client compares the PGN to his PGN.
+  1. It checks whether it was Alice's turn. (fail -> wrongTurn)
+  2. It checks whether exactly one new move was appended beyond the accepted state (fail -> badPrev)
+  3. If the previous check passed, it checks the one new move that was added with the chess engine (fail -> illegalMove)
+  4. It computes the resulting FEN from Alice's full PGN and matches it to Alice's FEN  (fail -> badFEN)
+13. Bob makes a move on the UI.
+
+If Alice's Jetstream listener notices that Bob rejected her move while she's waiting for him to take his turn, she would ideally rectify the mistake by making another update to her game record.
+- If her most recent move is an illegal move, she could just choose a different move
+- If she miscomputed the FEN, she could try computing it again
+- If she appended too much information to the PGN, she could fix those kinds of errors
+- If Alice and Bob disagree on the history of the game up to that point, we sort of reach an unresolvable deadlock, especially if Bob keeps sending more reject records. At that point, it would be best to leave the game unfinished. We don't auto-end the game. We should only end games if there's a clear winner via checkmate, an agreed upon draw (currently planned), a timeout (currently planned), or one of the players forfeits.
+If Alice fixes her error and writes the fix to her repo, then Bob would take his turn and play would continue as normal.
 
 ## Auth Tests
 

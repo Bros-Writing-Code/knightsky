@@ -32,6 +32,16 @@ function game(overrides = {}) {
   };
 }
 
+function clock(overrides = {}) {
+  return {
+    initialMs: 600000,
+    incrementMs: 2000,
+    remainingMs: 534200,
+    movedAt: '2026-11-20T19:04:12.000Z',
+    ...overrides,
+  };
+}
+
 function reject(overrides = {}) {
   return {
     $type: REJECT,
@@ -72,7 +82,17 @@ describe('Option 1 Lexicon documents', () => {
   });
 
   it('does not treat null as omission or an empty value', () => {
-    for (const field of ['opponent', 'color', 'pgn', 'fen', 'status', 'challenge']) {
+    for (const field of [
+      'opponent',
+      'color',
+      'pgn',
+      'fen',
+      'status',
+      'challenge',
+      'termination',
+      'result',
+      'clock',
+    ]) {
       expect(() => validate(game({ [field]: null }))).toThrow();
     }
     for (const field of ['subject', 'reason', 'message']) {
@@ -110,7 +130,44 @@ describe('game record', () => {
   });
 
   it('accepts resignation without requiring a new move', () => {
-    expect(() => validate(game({ status: 'resigned' }))).not.toThrow();
+    expect(() =>
+      validate(game({ status: 'ended', termination: 'resignation', result: 'loss' })),
+    ).not.toThrow();
+  });
+
+  it('accepts a draw offer while the game is in progress', () => {
+    expect(() => validate(game({ status: 'drawOffered' }))).not.toThrow();
+  });
+
+  it('accepts a draw by agreement', () => {
+    expect(() =>
+      validate(game({ status: 'ended', termination: 'agreement', result: 'draw' })),
+    ).not.toThrow();
+  });
+
+  it.each([
+    'checkmate',
+    'resignation',
+    'agreement',
+    'timeout',
+    'stalemate',
+    'insufficientMaterial',
+    'threefoldRepetition',
+    'fivefoldRepetition',
+    'fiftyMoveRule',
+    'seventyFiveMoveRule',
+  ])('accepts termination %s', (termination) => {
+    expect(() => validate(game({ status: 'ended', termination, result: 'draw' }))).not.toThrow();
+  });
+
+  it.each(['abandoned', 'customTermination'])('accepts future termination %j', (termination) => {
+    expect(() => validate(game({ status: 'ended', termination, result: 'win' }))).not.toThrow();
+  });
+
+  it.each(['win', 'loss', 'draw'])('accepts result %s', (result) => {
+    expect(() =>
+      validate(game({ status: 'ended', termination: 'checkmate', result })),
+    ).not.toThrow();
   });
 
   it.each(['opponent', 'color', 'pgn', 'fen', 'status'])('requires %s', (field) => {
@@ -127,10 +184,37 @@ describe('game record', () => {
     ['pgn', []],
     ['fen', ''],
     ['fen', 42],
+    ['status', 'resigned'],
     ['status', 'checkmate'],
     ['status', 'draw'],
+    ['termination', ''],
+    ['termination', 42],
+    ['result', 'lose'],
+    ['result', 'white'],
+    ['clock', 600000],
   ])('rejects invalid %s value %j', (field, value) => {
     expect(() => validate(game({ [field]: value }))).toThrow();
+  });
+
+  it.each(['initialMs', 'incrementMs', 'remainingMs'])('requires clock.%s', (field) => {
+    const record = game({ clock: clock() });
+    delete record.clock[field];
+    expect(() => validate(record)).toThrow();
+  });
+
+  it.each([
+    ['initialMs', 0],
+    ['initialMs', 1.5],
+    ['initialMs', '600000'],
+    ['incrementMs', -1],
+    ['remainingMs', -1],
+    ['remainingMs', 1.5],
+    ['remainingMs', '534200'],
+    ['movedAt', 'yesterday'],
+    ['movedAt', 42],
+    ['movedAt', null],
+  ])('rejects invalid clock.%s value %j', (field, value) => {
+    expect(() => validate(game({ clock: clock({ [field]: value }) }))).toThrow();
   });
 
   it('bounds PGN in UTF-8 bytes while allowing empty starting history', () => {
@@ -147,12 +231,53 @@ describe('game record', () => {
     // Lexicon has no chess-specific string format or cross-field constraints.
     expect(() => validate(game({ pgn: 'not PGN', fen: 'not FEN' }))).not.toThrow();
   });
+
+  it('leaves termination and result consistency with status to the client', () => {
+    // Lexicon cannot express "required when status is ended".
+    expect(() => validate(game({ status: 'ended' }))).not.toThrow();
+    expect(() =>
+      validate(game({ status: 'active', termination: 'checkmate', result: 'win' })),
+    ).not.toThrow();
+  });
+
+  it('accepts a timed game before the owner has moved', () => {
+    expect(() =>
+      validate(game({ clock: { initialMs: 600000, incrementMs: 2000, remainingMs: 600000 } })),
+    ).not.toThrow();
+  });
+
+  it('accepts a timed game with the owner clock and move time', () => {
+    expect(() => validate(game({ clock: clock() }))).not.toThrow();
+  });
+
+  it('accepts a timeout with zero increment and an empty clock', () => {
+    expect(() =>
+      validate(
+        game({
+          status: 'ended',
+          termination: 'timeout',
+          result: 'loss',
+          clock: clock({ initialMs: 180000, incrementMs: 0, remainingMs: 0 }),
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it('leaves clock arithmetic to the client', () => {
+    // Lexicon has no cross-field constraints, e.g. remainingMs above initialMs.
+    expect(() =>
+      validate(game({ clock: clock({ initialMs: 1000, remainingMs: 999999 }) })),
+    ).not.toThrow();
+  });
 });
 
 describe('reject record', () => {
-  it.each(['wrongTurn', 'badPrev', 'illegalMove', 'badFEN'])('accepts reason %s', (reason) => {
-    expect(() => validate(reject({ reason }))).not.toThrow();
-  });
+  it.each(['wrongTurn', 'badPrev', 'illegalMove', 'badFEN', 'noDrawOffer', 'badClock'])(
+    'accepts reason %s',
+    (reason) => {
+      expect(() => validate(reject({ reason }))).not.toThrow();
+    },
+  );
 
   it('accepts an optional plain-text explanation', () => {
     expect(() => validate(reject({ message: 'Please replay your last move.' }))).not.toThrow();

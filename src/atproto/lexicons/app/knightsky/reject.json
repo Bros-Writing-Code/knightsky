@@ -18,8 +18,15 @@
           "reason": {
             "type": "string",
             "minLength": 1,
-            "knownValues": ["wrongTurn", "badPrev", "illegalMove", "badFEN"],
-            "description": "wrongTurn: opponent moved out of turn; badPrev: history does not extend the last accepted history by exactly one ply; illegalMove: the appended move is illegal; badFEN: supplied FEN differs from the position computed from PGN."
+            "knownValues": [
+              "wrongTurn",
+              "badPrev",
+              "illegalMove",
+              "badFEN",
+              "noDrawOffer",
+              "badClock"
+            ],
+            "description": "wrongTurn: opponent moved out of turn; badPrev: history does not extend the last accepted history by exactly one ply; illegalMove: the appended move is illegal; badFEN: supplied FEN differs from the position computed from PGN; noDrawOffer: the update accepts a draw by agreement that the rejecting player has not offered; badClock: the clock or a timeout claim does not match the agreed time control and observed timing."
           },
           "message": {
             "type": "string",

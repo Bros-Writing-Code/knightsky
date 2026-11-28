@@ -16,6 +16,25 @@ Authors: James Keys and Adarsh Shetkar
 
 The session only carries the DID (`session.sub`), so use `getProfile` to show a name. Only the `atproto` scope is requested for now. Locally the library's loopback client is used. In production `client-metadata.json` is generated from `SITE_URL`, see [Deployment](../../docs/deployment.md).
 
+## Writing Records
+
+[records.js](./records.js) writes the signed-in player's own records. Like `watchGames.js`, it knows nothing about chess: the UI computes `pgn` and `fen` with the engine and passes them in. The network functions are stubs that reject with `NotImplemented` until their issues land.
+
+| Function | What it does | Issue |
+| --- | --- | --- |
+| `createRecordWriter(session)` | Returns the writer below for the session from `initAuth()`. | #119 |
+| `createInvite({ opponent, color, clock? })` | Writes an invitation; returns `{ uri, cid, link }`. `opponent` is a DID (`getProfile(handle)` returns it). | #63 |
+| `acceptInvite(invitation)` | Writes an acceptance of the challenger's record: other color, same clock, `challenge` set. | #114 |
+| `updateGame(myRecord, changes)` | Replaces my record with its value plus `changes`. Fails with `StaleRecord` if `myRecord.cid` is no longer the latest version. | #73 |
+| `reject(opponentRecord, reason, message?)` | Writes a reject record about that exact version of the opponent's record. | #73 |
+| `postMove(myRecord, { pgn, fen, clock? })` | `updateGame` with `status: 'active'`, which also withdraws or declines a draw offer. | #62 |
+| `offerDraw(myRecord)` / `acceptDraw(myRecord)` | `drawOffered`, or `ended` / `agreement` / `draw`. | #116 |
+| `resign(myRecord)` | `ended` / `resignation` / `loss`. | #117 |
+| `inviteLink(gameUri)` / `parseInviteLink(url)` | Builds or reads `<site>/?game=<invitation AT-URI>`. | #68, #115 |
+| `gameEndFields(state, myColor)` | The `status`, `termination` and `result` to write when the engine says the game is over, or `null`. Maps engine draw reasons to Lexicon values. | #118 |
+
+Write errors are CodedErrors: `NetworkError`, `RateLimited`, `HttpError`, `InvalidRecord` (doesn't match the Lexicon, including `ended` without `termination` and `result`) or `StaleRecord`. After `createInvite` or `acceptInvite`, call `watchGames`' `add(uri)` so the new game is watched.
+
 ## Lexicon
 
 Our overall design principle is to treat opponents' moves as untrusted user data. We always validate their moves on our client with the chess engine to ensure that we agree on the current state of the game.

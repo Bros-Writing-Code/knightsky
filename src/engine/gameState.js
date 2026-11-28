@@ -200,41 +200,58 @@ function positionKey(state) {
   return fields.slice(0, 4).join(' ');
 }
 
-/** Check the state fields applyMove needs before generating moves. */
-function validMoveState(state) {
-  try {
-    GameStatetoFEN(state);
-    if (
-      !Array.isArray(state.moveHistory) ||
-      !Array.isArray(state.positionHistory) ||
-      !state.moveHistory.every((move) => move?.from && move?.to)
-    ) {
-      return false;
-    }
-    const kings = SQUARES.filter((index) => state.board[index]?.type === 'k');
-    return kings.length === 2 && state.board[kings[0]].color !== state.board[kings[1]].color;
-  } catch {
-    return false;
-  }
+/**
+ * Cheap shape check, so a broken or missing state returns a Result error
+ * instead of throwing. The position itself (two kings, valid FEN fields) is
+ * checked once, when createGame loads it, not on every move.
+ *
+ * @param {unknown} state
+ * @returns {boolean}
+ */
+function hasGameShape(state) {
+  const s = /** @type {any} */ (state);
+  return (
+    !!s &&
+    Array.isArray(s.board) &&
+    s.board.length === 128 &&
+    (s.currentTurn === 'w' || s.currentTurn === 'b') &&
+    Array.isArray(s.moveHistory) &&
+    Array.isArray(s.positionHistory)
+  );
 }
 
 /**
- * Apply a UCI move and return a new game state; the input is never mutated.
- * Bad move strings and illegal moves are returned as Result errors.
+ * @typedef {Object} CheckedMove
+ * @property {import('./types.js').Move} move
+ * @property {number} from - 0x88 index.
+ * @property {number} to - 0x88 index.
+ * @property {import('./types.js').Piece} piece - The moving piece.
+ * @property {boolean} promotes
+ */
+
+/**
+ * Checks that a UCI move is legal without building the next state.
+ * Shared by applyMove and isValidMove.
  *
  * @param {GameState} state
  * @param {string} uci
- * @returns {import('./types.js').Result<GameState>}
+ * @returns {import('./types.js').Result<CheckedMove>}
  */
-export function applyMove(state, uci) {
+export function checkMove(state, uci) {
   let move;
   try {
-    move = UCItoMove(uci);
+    const parsed = UCItoMove(uci);
+    // Frozen because move records are shared between states (see applyMove).
+    move = Object.freeze({
+      ...parsed,
+      from: Object.freeze(parsed.from),
+      to: Object.freeze(parsed.to),
+    });
   } catch {
     return { ok: false, error: 'Malformed UCI move' };
   }
 
-  if (!validMoveState(state)) {
+  if (!hasGameShape(state)) {
     return { ok: false, error: 'Invalid game state' };
   }
 
@@ -263,13 +280,33 @@ export function applyMove(state, uci) {
     return { ok: false, error: 'Promotion is not allowed for this move' };
   }
 
+  return { ok: true, value: { move, from, to, piece, promotes } };
+}
+
+/**
+ * Apply a UCI move and return a new game state; the input is never mutated.
+ * Bad move strings and illegal moves are returned as Result errors.
+ *
+ * The new state shares piece objects and earlier move records with the old
+ * one. That is safe because they are frozen (createGame freezes the pieces,
+ * applyMove the promoted pieces and move records), so changing one throws
+ * instead of changing older states. getPiece/toGrid also hand out copies.
+ *
+ * @param {GameState} state - A state from createGame, replayMoves or applyMove.
+ * @param {string} uci
+ * @returns {import('./types.js').Result<GameState>}
+ */
+export function applyMove(state, uci) {
+  const checked = checkMove(state, uci);
+  if (!checked.ok) {
+    return checked;
+  }
+  const { move, from, to, piece, promotes } = checked.value;
+
   const captured = state.board[to];
-  // Give the new state its own piece objects as well as its own board array.
-  const board = boardAfterMove(state, state.board, from, to, piece).map((occupant) =>
-    occupant ? { ...occupant } : null,
-  );
+  const board = boardAfterMove(state, state.board, from, to, piece);
   if (promotes) {
-    board[to] = { color: piece.color, type: move.promotion };
+    board[to] = Object.freeze({ color: piece.color, type: /** @type {any} */ (move.promotion) });
   }
 
   const castlingRights = { ...state.castlingRights };
@@ -300,14 +337,7 @@ export function applyMove(state, uci) {
     enPassantTarget,
     halfmoveClock: piece.type === 'p' || captured ? 0 : state.halfmoveClock + 1,
     fullmoveNumber: state.fullmoveNumber + (piece.color === 'b' ? 1 : 0),
-    moveHistory: [
-      ...state.moveHistory.map((pastMove) => ({
-        ...pastMove,
-        from: { ...pastMove.from },
-        to: { ...pastMove.to },
-      })),
-      move,
-    ],
+    moveHistory: [...state.moveHistory, move],
     positionHistory: [
       ...(state.positionHistory.length ? state.positionHistory : [positionKey(state)]),
     ],
